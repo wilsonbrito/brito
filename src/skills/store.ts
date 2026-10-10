@@ -101,25 +101,48 @@ export function staleRefs(root: string, s: Skill): string[] {
   });
 }
 
-/** Padrões que nunca devem entrar numa skill: ela vira instrução do agente via `skill_load`. */
-const LINT_RULES: { re: RegExp; msg: string }[] = [
-  { re: /\/(Users|home)\/[^\s/]+\/|[A-Za-z]:\\Users\\/, msg: "contém caminho absoluto do usuário; use caminhos relativos ao projeto" },
-  { re: /\bsk-[A-Za-z0-9_-]{16,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{20,}|\bxox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY|\bBearer\s+[A-Za-z0-9._~+/-]{20,}/, msg: "parece conter segredo/token" },
+/**
+ * Padrões que nunca devem entrar numa skill: ela vira instrução do agente via `skill_load`.
+ * `redact: true` = o trecho também é troca por [redigido] em texto guardado em disco (ex.: journal).
+ */
+const LINT_RULES: { re: RegExp; msg: string; redact?: boolean }[] = [
+  { re: /\/(Users|home)\/[^\s/]+\/|[A-Za-z]:\\Users\\/, msg: "contém caminho absoluto do usuário; use caminhos relativos ao projeto", redact: true },
+  { re: /\bsk-[A-Za-z0-9_-]{16,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{20,}|\bxox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY|\bBearer\s+[A-Za-z0-9._~+/-]{20,}/, msg: "parece conter segredo/token", redact: true },
+  // Credencial embutida em URL (esquema://usuário:senha@host), de qualquer serviço. Marcadores óbvios de exemplo
+  // (password, <senha>, ${VAR}, xxx…) passam: o problema é a senha real, não a sintaxe.
+  { re: /\b[a-z][a-z0-9+.-]{1,20}:\/\/[^\s:@/]*:(?!(\$\{?\w+\}?|<[^>\s]*>|x{2,}|\*+|pass(word)?|senha|secret|changeme|your[-_]?\w*)@)[^\s@/]{3,}@/i, msg: "contém credencial em URL (usuário:senha@host); use variável de ambiente e cite só o nome dela", redact: true },
   { re: /\b(curl|wget)\b[^\n|]*\|\s*(sudo\s+)?(sh|bash|zsh)\b/i, msg: "baixa e executa script remoto (curl|sh)" },
   { re: /\b(ignor(e|ar|em)|desconsider(e|ar))\b[^\n]{0,30}\b(instru[cç][õo]es|previous|prior|anteriores|regras)/i, msg: "tenta sobrepor instruções anteriores" },
   { re: /\b(sem|n[ãa]o|nunca|jamais)\s+(pe[çc]a|pedir|solicit(e|ar)|precisa)[^\n]{0,20}(aprova[çc][ãa]o|permiss[ãa]o|confirma[çc][ãa]o)|\b(pular|ignorar|burlar|desativar)\s+(a\s+)?(aprova[çc][ãa]o|permiss[ãa]o|permiss[õo]es)|\bskip\s+(the\s+)?(approval|permission)/i, msg: "dá instruções sobre pular aprovação/permissões" },
 ];
 
-/** Troca segredos e caminhos absolutos por [redigido]: para texto que vai ser guardado em disco (ex.: journal). */
+/** Troca segredos, credenciais e caminhos absolutos por [redigido]: para texto que vai ser guardado em disco (ex.: journal). */
 export function redact(text: string): string {
-  return LINT_RULES.slice(0, 2).reduce((t, r) => t.replace(new RegExp(r.re.source, "g"), "[redigido]"), text);
+  return LINT_RULES.filter((r) => r.redact).reduce((t, r) => t.replace(new RegExp(r.re.source, r.re.flags.includes("g") ? r.re.flags : r.re.flags + "g"), "[redigido]"), text);
 }
+
+/**
+ * Comandos que apagam ou sobrescrevem dados de forma difícil de desfazer. NÃO bloqueiam (muitos são legítimos, como
+ * `rm -rf dist`), mas aparecem como aviso na aprovação: uma skill vira instrução permanente, e um passo destrutivo
+ * que só era seguro no estado daquele momento (ex.: "recrie o banco", quando estava vazio) vira armadilha depois.
+ * Independe de linguagem, banco ou ferramenta: são os padrões mais comuns de perda de dados.
+ */
+const DESTRUCTIVE_RULES: { re: RegExp; msg: string }[] = [
+  { re: /\brm\s+-[a-z]*[rf][a-z]*\s+[^\n]*\.(db|sqlite3?|mdb|sql|dump|bak)\b/i, msg: "apaga arquivo de dados/banco" },
+  { re: /\brm\s+-[a-z]*r[a-z]*\s+(\/|~|\$HOME|\*|\.\s|\.\/\s)/i, msg: "apaga recursivamente a raiz, o home ou tudo" },
+  { re: /\bDROP\s+(TABLE|DATABASE|SCHEMA|COLLECTION)\b|\bTRUNCATE\s+(TABLE\s+)?\w/i, msg: "remove tabelas/bancos ou esvazia dados (SQL)" },
+  { re: /\bDELETE\s+FROM\s+[\w."`[\]]+\s*(;|$)/im, msg: "DELETE sem WHERE" },
+  { re: /\b(migrate[:\s-]+(reset|fresh)|db:(drop|reset)|drop-?database|flush(all|db))\b/i, msg: "reseta o banco/migrações/cache" },
+  { re: /\bgit\s+(reset\s+--hard|clean\s+-[a-z]*f|push\s+(-f\b|--force\b(?!-with-lease)))/i, msg: "descarta alterações ou reescreve histórico remoto (git)" },
+  { re: /\bdocker\s+(compose\s+down\s+(-v|--volumes)|volume\s+(rm|prune))/i, msg: "apaga volumes do Docker (dados persistentes)" },
+];
 
 export function lintSkill(input: SkillInput): { errors: string[]; warnings: string[] } {
   const text = `${input.description}\n${input.body}`;
   const errors = LINT_RULES.filter((r) => r.re.test(text)).map((r) => r.msg);
-  const warnings = [...new Set(text.match(/https?:\/\/[^\s)>\]"']+/g) ?? [])].map((u) => `contém URL: ${u}`);
-  return { errors, warnings };
+  const urls = [...new Set(text.match(/https?:\/\/[^\s)>\]"']+/g) ?? [])].map((u) => `contém URL: ${u}`);
+  const destructive = DESTRUCTIVE_RULES.filter((r) => r.re.test(text)).map((r) => `comando destrutivo (${r.msg}): só mantenha se houver guarda (backup, cópia/ambiente de teste ou confirmação)`);
+  return { errors, warnings: [...urls, ...destructive] };
 }
 
 export function validate(input: SkillInput) {

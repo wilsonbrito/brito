@@ -20,7 +20,7 @@ import { hasClaudeCli, ClaudeSession } from "./agent/claude-cli.js";
 import { serveMcp } from "./mcp/server.js";
 import "./tools/skills.js";
 import type { ToolContext } from "./tools/registry.js";
-import { approvePending, listPending, listSkills, rejectPending, skillsIndex, staleRefs } from "./skills/store.js";
+import { approvePending, lintSkill, listPending, listSkills, rejectPending, skillsIndex, staleRefs } from "./skills/store.js";
 import { applyProposal, describeProposal, proposeConsolidation, pruneCandidates, type Proposal } from "./skills/consolidate.js";
 import { defaultComplete, reflect, shouldReflect, type Complete } from "./skills/learn.js";
 import { claudeCliComplete } from "./skills/learn-cli.js";
@@ -264,6 +264,8 @@ const skillsCommand = (root: string, io: { ask: (q: string, opts?: { force?: boo
           const p = listPending(root).find((x) => x.name === name);
           if (!p) { ui.warn(`sem proposta pendente: ${name}`); return; }
           ui.print(`  ${c.soft(p.name)} ${c.muted(`(${p.scope}) ${p.description}`)}\n${p.body.split("\n").map((l) => `  │ ${l}`).join("\n")}`);
+          // Avisos do lint (ex.: comando destrutivo) ficam à vista de quem aprova, não só de quem propõe.
+          for (const w of lintSkill(p).warnings) ui.print(c.warn(`  ⚠ ${w}`));
           if (!(await io.ask(`aprovar a skill ${name}?`, { force: true }))) { ui.info("mantida como pendente"); return; }
           const r = approvePending(root, name);
           ui.print(c.ok("✦ ") + `skill ${name} ativa (${r.scope}, v${r.version})`);
@@ -274,7 +276,10 @@ const skillsCommand = (root: string, io: { ask: (q: string, opts?: { force?: boo
     const pending = listPending(root);
     if (sub === "pending") {
       if (!pending.length) { ui.info("nenhuma proposta pendente"); return; }
-      for (const p of pending) ui.print(`  ${c.soft(p.name)} ${c.muted(`(${p.scope}) ${p.description}`)}`);
+      for (const p of pending) {
+        const avisos = lintSkill(p).warnings.filter((w) => w.startsWith("comando destrutivo")).length;
+        ui.print(`  ${c.soft(p.name)} ${c.muted(`(${p.scope}) ${p.description}`)}${avisos ? " " + c.warn(`⚠ ${avisos} comando(s) destrutivo(s)`) : ""}`);
+      }
       return;
     }
     const skills = listSkills(root);

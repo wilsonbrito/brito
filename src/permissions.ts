@@ -4,6 +4,14 @@ export type PermMode = "manual" | "auto" | "plan" | "bypass";
 /** Estado global da sessão (um REPL por processo). */
 export const perms: { mode: PermMode } = { mode: "manual" };
 
+/**
+ * O servidor MCP roda em outro processo e não enxerga o `perms` do REPL: o REPL passa o modo por `BRITO_PERMS_MODE`.
+ * Valor ausente ou inválido = undefined (o servidor fica no padrão `manual`).
+ */
+export const MODE_ENV = "BRITO_PERMS_MODE";
+export const modeFromEnv = (v: string | undefined): PermMode | undefined =>
+  (["manual", "auto", "plan", "bypass"] as const).find((m) => m === v);
+
 const CYCLE: PermMode[] = ["manual", "auto", "plan"];
 
 /** Próximo modo do ciclo; `bypass` (de --yes ou "tudo") volta para manual. */

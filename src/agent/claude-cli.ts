@@ -5,7 +5,7 @@ import { buildSystemPrompt } from "./prompt.js";
 import { skillsIndex } from "../skills/store.js";
 import { MCP_NAME, MCP_PREFIX, APPROVE_TOOL } from "../mcp/server.js";
 import { ui } from "../ui/ui.js";
-import { perms } from "../permissions.js";
+import { MODE_ENV, perms, type PermMode } from "../permissions.js";
 import { wireEffort } from "../model.js";
 import type { TurnRecord } from "./loop.js";
 
@@ -61,6 +61,14 @@ export function recordStreamEvent(turn: TurnRecord, ev: any, loadedSkills: Set<s
   }
 }
 
+/**
+ * Config do servidor MCP entregue ao claude. O servidor roda em outro processo: o env leva o socket de aprovação
+ * e o modo de permissão do REPL (vale por turno, pois cada turno sobe um claude novo com esta config).
+ */
+export function mcpConfig(cmd: { command: string; args: string[] }, approvalSock: string, mode: PermMode) {
+  return { mcpServers: { [MCP_NAME]: { type: "stdio", command: cmd.command, args: cmd.args, env: { BRITO_APPROVE_SOCK: approvalSock, [MODE_ENV]: mode } } } };
+}
+
 export interface ClaudeBackendOpts {
   root: string;
   /** socket unix onde o REPL atende os pedidos de permissão */
@@ -99,7 +107,7 @@ export class ClaudeSession {
 
   private args(text: string): string[] {
     const { root, approvalSock, stats, mcpCommand } = this.o;
-    const mcp = { mcpServers: { [MCP_NAME]: { type: "stdio", command: mcpCommand.command, args: mcpCommand.args, env: { BRITO_APPROVE_SOCK: approvalSock } } } };
+    const mcp = mcpConfig(mcpCommand, approvalSock, perms.mode);
     const readOnlyMcp = ["graph_search", "graph_callers", "graph_callees", "graph_impact", "graph_context", "graph_query", "graph_index", "remember", "recall", "skill_load"];
     const system = buildSystemPrompt(root, stats, skillsIndex(root)) +
       `\n\n# Nesta sessão\nAs tools do Brito chegam com o prefixo \`${MCP_PREFIX}\` (ex.: ${MCP_PREFIX}graph_context). Use-as como descrito acima. ` +

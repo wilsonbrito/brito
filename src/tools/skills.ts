@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { defineTool } from "./registry.js";
-import { bumpUses, deleteSkill, getSkill, saveSkill, validate } from "../skills/store.js";
+import { bumpUses, deleteSkill, getSkill, listPending, savePending, saveSkill, validate } from "../skills/store.js";
 import { describeSave } from "../skills/describe.js";
+import { perms } from "../permissions.js";
 
 defineTool({
   name: "skill_load",
@@ -19,7 +20,7 @@ defineTool({
 defineTool({
   name: "skill_save",
   description:
-    "Cria ou atualiza uma skill: procedimento reutilizável aprendido numa tarefa. Só para padrões GERAIS e repetíveis (como fazer X neste projeto, armadilhas, como verificar) — nunca fatos de uma tarefa única, segredos ou caminhos absolutos. Se já existe skill parecida, ATUALIZE-A (mesmo name) em vez de criar outra. body em markdown: ## Quando usar, ## Passos, ## Armadilhas, ## Verificação.",
+    "Cria ou atualiza uma skill: procedimento reutilizável aprendido numa tarefa. Só para padrões GERAIS e repetíveis (como fazer X neste projeto, armadilhas, como verificar) — nunca fatos de uma tarefa única, segredos ou caminhos absolutos. Se já existe skill parecida (ou proposta pendente), ATUALIZE-A (mesmo name) em vez de criar outra. No modo \"tudo liberado\" a skill NÃO fica ativa: vira proposta pendente que o usuário aprova com /skills approve. body em markdown: ## Quando usar, ## Passos, ## Armadilhas, ## Verificação.",
   schema: z.object({
     name: z.string().describe("kebab-case"),
     description: z.string().describe("uma frase: QUANDO usar (10–200 chars)"),
@@ -30,8 +31,14 @@ defineTool({
   }),
   dangerous: true,
   describe: (i, ctx) => describeSave(ctx.root, i),
-  async run({ name, description, body, refs, scope }, ctx) {
+  async run({ name, description, body, refs, scope, reason }, ctx) {
     validate({ name, description, body });
+    // Em bypass nada pede aprovação, então uma skill gravada aqui viraria instrução ativa sem nenhum humano ter visto.
+    // Mesma política do reflect(): vai para a fila de revisão. Vale para o backend de API e para o servidor MCP.
+    if (perms.mode === "bypass") {
+      const target = savePending(ctx.root, { name, description, body, refs, reason }, scope);
+      return `Skill ${name} proposta (${target}) e aguardando revisão: /skills approve ${name} (modo "tudo liberado": nenhuma skill fica ativa sem revisão).`;
+    }
     const r = saveSkill(ctx.root, { name, description, body, refs }, scope);
     return r.created ? `Skill ${name} criada (${r.scope}, v1).` : `Skill ${name} atualizada (${r.scope}, v${r.version}); a anterior ficou em history/.`;
   },
@@ -44,7 +51,10 @@ defineTool({
   dangerous: true,
   describe: (i) => `REMOVER skill ${i.name} — ${i.reason}`,
   async run({ name }, ctx) {
-    if (!deleteSkill(ctx.root, name)) throw new Error(`Skill não encontrada: ${name}`);
+    if (!deleteSkill(ctx.root, name)) {
+      if (listPending(ctx.root).some((p) => p.name === name)) throw new Error(`"${name}" é uma proposta pendente, não uma skill ativa: o usuário a descarta com /skills reject ${name}.`);
+      throw new Error(`Skill não encontrada: ${name}`);
+    }
     return `Skill ${name} removida.`;
   },
 });

@@ -8,6 +8,7 @@ import "../tools/skills.js";
 import { allTools, execTool, type ToolContext } from "../tools/registry.js";
 import { GraphStore } from "../graph/store.js";
 import { indexProject } from "../graph/indexer.js";
+import { MODE_ENV, modeFromEnv, perms } from "../permissions.js";
 
 export const MCP_NAME = "brito";
 /** Prefixo com que o claude CLI enxerga as tools deste servidor. */
@@ -35,6 +36,8 @@ function askRepl(toolName: string, input: unknown): Promise<{ allow: boolean; me
 /** Servidor MCP (stdio) que expõe grafo, memória e skills do Brito ao `claude` CLI. */
 export async function serveMcp(root: string): Promise<void> {
   const graph = await GraphStore.open(root);
+  // Espelha o modo do REPL: em bypass, skill_save vira proposta pendente em vez de skill ativa (ver tools/skills.ts).
+  perms.mode = modeFromEnv(process.env[MODE_ENV]) ?? perms.mode;
   const ctx: ToolContext = {
     root, graph, dirty: true, loadedSkills: new Set(),
     // O claude já pede/nega permissão para tools MCP; aqui só executa.

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { execTool, toApiTools, type ToolContext } from "../tools/registry.js";
 import type { TurnRecord } from "../agent/loop.js";
 import { perms } from "../permissions.js";
-import { getSkill, listSkills, savePending, staleRefs } from "./store.js";
+import { getSkill, listPending, listSkills, savePending, staleRefs } from "./store.js";
 import { appendJournal, describeEntry, entryFromTurn, similarEntries } from "./journal.js";
 
 /** Turno longo sem nenhum outro sinal só vale reflexão a partir deste tamanho. */
@@ -100,7 +100,7 @@ export const SYSTEM = `Você revisa o que um agente de programação acabou de f
 Crie ou atualize uma skill SOMENTE se TODAS forem verdade:
 - o trabalho foi não trivial e o procedimento vai se repetir (ex.: "como adicionar uma tool nova", "como rodar e validar migrações", "como depurar X");
 - o valor está no COMO (passos, ordem, armadilhas, comando de verificação), não em fatos de uma tarefa única;
-- não é duplicata: se já existe skill parecida, ATUALIZE-A (mesmo name) incorporando o que se aprendeu, em vez de criar outra;
+- não é duplicata: se já existe skill parecida OU uma proposta pendente parecida (seção "# Propostas pendentes"), ATUALIZE-A (mesmo name) incorporando o que se aprendeu, em vez de criar outra. Proposta pendente conta como existente: várias skills quase iguais esperando revisão são um defeito;
 - a skill carregada no turno teve falhas, passos faltando ou desvios do agente → corrija-a. Se o agente a seguiu sem tropeços e ela está correta e completa, NÃO a altere.
 
 O tamanho do turno não importa: poucas chamadas bastam se houve uma armadilha séria e repetível (erro que só se resolveu com um passo não óbvio). Uma correção do usuário sobre COMO fazer algo no projeto (convenção, comando, abordagem) costuma valer skill. Erro cuja causa foi um defeito pontual desta tarefa (typo, arquivo renomeado por engano) NÃO vale.
@@ -110,6 +110,8 @@ Uma skill guarda o que é ESPECÍFICO deste projeto (comandos, arquivos, ordem, 
 Se houver a seção "# Sinais", ela é só uma pista de onde o turno tropeçou ou foi corrigido, não uma ordem de salvar: transforme erro→conserto em Armadilhas e correções do usuário em passos/convenções apenas se forem específicos do projeto e valerem para uma tarefa DIFERENTE no futuro. Na dúvida, não salve.
 
 Escopo: o padrão é "project". Use "global" apenas para métodos que valeriam em QUALQUER repositório (ex.: depuração sistemática, fluxo de commit/PR, como investigar uma regressão) e que não citam arquivos, módulos ou convenções deste projeto. Ao atualizar uma skill existente, omita scope.
+
+Cuidado com passos destrutivos: não registre como passo PADRÃO um comando que apaga ou recria dados (arquivo de dados, banco, volume, reset de migrações, force push, reset --hard) só porque funcionou naquela tarefa. Muitas vezes era seguro apenas pelo estado do momento (ex.: base ainda vazia) e vira perda de dados depois. Descreva a versão segura (simular antes, backup, cópia ou ambiente de teste, confirmação do usuário) e deixe explícito quando o comando destrutivo é a exceção. Nunca cite credenciais nem URLs com senha: cite só o nome da variável de ambiente.
 
 Se a tarefa foi simples, única ou nada se generaliza, NÃO chame nenhuma tool. Isso é o resultado esperado na maioria das vezes.
 
@@ -124,11 +126,13 @@ function renderPrevious(turn: TurnRecord): string {
 /** Monta o texto que o modelo de reflexão recebe. Puro: não toca em rede nem em disco além de ler skills. */
 export function buildReflectInput(turn: TurnRecord, ctx: ToolContext, previous?: TurnRecord | null): string {
   const existing = listSkills(ctx.root);
+  const pending = listPending(ctx.root);
   const loaded = [...(ctx.loadedSkills ?? [])].flatMap((n) => { const s = getSkill(ctx.root, n); return s ? [s] : []; });
   const signals = extractSignals(turn);
   const seen = similarEntries(ctx.root, turn);
   return (
     `# Skills existentes\n${existing.length ? existing.map((s) => `- ${s.name}${s.scope === "global" ? " (global)" : ""}${staleRefs(ctx.root, s).length ? " [refs obsoletas]" : ""}: ${s.description}`).join("\n") : "(nenhuma)"}\n\n` +
+    (pending.length ? `# Propostas pendentes (aguardam revisão do usuário; contam como existentes: para ajustar uma, use o MESMO name)\n${pending.map((p) => `- ${p.name}${p.scope === "global" ? " (global)" : ""}: ${p.description}`).join("\n")}\n\n` : "") +
     (loaded.length ? `# Skills carregadas neste turno (candidatas a melhoria)\n${loaded.map((s) => `## ${s.name} (${s.scope}) v${s.version}${staleRefs(ctx.root, s).length ? `\n(refs que não existem mais: ${staleRefs(ctx.root, s).join(", ")} — atualize se o turno mostrou os caminhos novos)` : ""}\n${s.body}`).join("\n\n")}\n\n` : "") +
     (signals.length ? `# Sinais\n${signals.map((x) => `- ${x.kind}: ${x.detail}`).join("\n")}\n\n` : "") +
     (seen.length ? `# Tarefas parecidas já vistas (sessões anteriores)\n${seen.map(describeEntry).join("\n")}\n\n` : "") +
