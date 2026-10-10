@@ -11,7 +11,7 @@ import { cols } from "./ui/theme.js";
 const userName = () => {
   try { return os.userInfo().username; } catch { return process.env.USER ?? process.env.USERNAME ?? "você"; }
 };
-import { listSkills, deleteSkill, promoteSkill, globalHome } from "./skills/store.js";
+import { listPending, listSkills, deleteSkill, promoteSkill, globalHome } from "./skills/store.js";
 import { listAgents } from "./agent/agents.js";
 import { perms, cycleMode, MODE_LABEL, type PermMode } from "./permissions.js";
 
@@ -47,7 +47,7 @@ const COMMON: Record<string, string> = {
   "/help": "esta ajuda",
   "/agents": "subagentes disponíveis",
   "/indicadores": "explica os números da barra de status",
-  "/skills": "lista, remove (rm) ou promove (promote) skills",
+  "/skills": "lista; pending | approve <nome> | reject <nome> | consolidate | rm <nome> | promote <nome>",
   "/modo": "mostra ou troca o modo (manual, auto, plano) — ou Shift+Tab",
   "/clear": "limpa a conversa",
   "/sair": "encerra (ou Ctrl+C duas vezes)",
@@ -132,13 +132,15 @@ export async function runRepl(b: ReplBackend, o: ReplOpts) {
       ui.print(`  ${c.soft(`${i.icon} ${i.name}`)} ${c.muted(i.hint)}`);
     },
     "/clear": () => { b.reset(); ui.info("conversa limpa"); },
-    "/skills": ([sub, name]) => {
+    // Este tratador vale antes de `b.commands` (ver `run` mais abaixo): ele cuida de `promote` e `rm` e DELEGA o resto
+    // (listar, pending, approve, reject, consolidate) ao /skills do backend. Sem a delegação, esse /skills completo
+    // ficava escondido e a revisão de propostas pendentes era inalcançável no REPL.
+    "/skills": async ([sub, name]) => {
+      const full = b.commands["/skills"];
       if (sub === "promote" && name) { try { promoteSkill(o.root, name); ui.print(c.ok(`promovida para global: ${name}`)); } catch (e: any) { ui.error(e.message); } }
       else if (sub === "rm" && name) ui.print(deleteSkill(o.root, name) ? c.ok(`removida: ${name}`) : c.warn(`não existe: ${name}`));
-      else {
-        const all = listSkills(o.root);
-        ui.print(all.length ? all.map((s) => `  ${c.soft(s.name)} ${c.muted(`[${s.scope}] v${s.version} · ${s.uses} usos —`)} ${s.description}`).join("\n") : c.dim("  (nenhuma skill ainda)"));
-      }
+      else if (full && (sub || listSkills(o.root).length || listPending(o.root).length)) await full.run([sub, name].filter((x): x is string => !!x));
+      else ui.print(c.dim("  (nenhuma skill ainda)"));
       refreshSkills();
     },
   };
