@@ -1,7 +1,7 @@
 {
   "name": "brito",
   "version": "0.1.0",
-  "description": "CLI de agentes para desenvolvimento com grafo de conhecimento do código e da memória",
+  "description": "Coding-agent CLI with a code knowledge graph, memory and reviewable skills / CLI de agente de código com grafo de conhecimento, memória e skills revisáveis",
   "type": "module",
   "bin": {
     "brito": "dist/cli.js"
@@ -32,6 +32,14 @@
     "typescript": "latest"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wilsonbrito/brito.git"
+  },
+  "homepage": "https://github.com/wilsonbrito/brito#readme",
+  "bugs": {
+    "url": "https://github.com/wilsonbrito/brito/issues"
+  },
   "author": "Wilson Brito",
   "engines": {
     "node": ">=20"
@@ -40,13 +48,21 @@
     "dist",
     ".brito/agents",
     "README.md",
+    "README.pt-BR.md",
     "LICENSE"
   ],
   "keywords": [
     "cli",
     "agent",
+    "coding-agent",
     "llm",
     "knowledge-graph",
-    "claude"
+    "code-graph",
+    "mcp",
+    "claude",
+    "tree-sitter",
+    "svelte",
+    "typescript",
+    "python"
   ]
 }
