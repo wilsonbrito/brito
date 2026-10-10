@@ -19,6 +19,36 @@ const DENIAL = /negou|denied|permission|interrompid|recusad|modo plano/i;
 const CORRECTION_START = /^\s*(n[ãa]o\b|errado|na verdade|ao inv[eé]s|em vez d[eo]|refa[çc]a|de novo\b|nope\b|wrong\b|actually\b|no,|don'?t\b|do not\b|instead\b)/i;
 const CONVENTION = /\b(neste projeto|nesse projeto|aqui (a gente )?usa|a conven[çc][ãa]o|sempre (use|rode|fa[çc]a)|nunca (use|fa[çc]a|rode)|from now on|always use|never use)\b/i;
 
+// "Não" no começo também abre recusa de oferta e agradecimento ("Não, obrigado", "Não obrigado, por ora vou usar"), que não
+// ensinam nada sobre COMO fazer algo. Tolera erro de digitação comum ("obbrigado").
+const GRATITUDE = /\b(ob+rigad[oa]s?|obg|valeu|thanks?|thank you|thx)\b/i;
+const DECLINE = /^\s*n[ãa]o\W*(ob+rigad|obg|valeu|precisa|por (hora|ora|enquanto|agora)|agora\b)/i;
+const BARE_NO = /^\s*(n[ãa]o|nope|no)\W*$/i;
+
+/** Mensagem do usuário que corrige o jeito de fazer algo (e não só recusa ou agradece). */
+export function isCorrection(text: string): boolean {
+  if (!CORRECTION_START.test(text)) return false;
+  return !(GRATITUDE.test(text) || DECLINE.test(text) || BARE_NO.test(text));
+}
+
+const EDIT_TOOLS = /^(edit|multiedit|write|notebookedit|read|edit_file|write_file|read_file)$/i;
+/** Uso errado da própria tool de edição/leitura: o texto não bate, o arquivo não foi lido. Não é armadilha do projeto. */
+const TOOL_MISUSE = /String to replace not found|old_string|has not been read yet|Found \d+ matches of the string|InputValidationError|<tool_use_error>|No changes to make/i;
+const BASH_TOOLS = /^(bash|run_command)$/i;
+/** Palavras que mostram uma falha de verdade. Sem nenhuma delas, `Exit code 1` costuma ser só grep/diff/test sem resultado. */
+// Sem fronteira de palavra de propósito: "ModuleNotFoundError", "TypeError", "ERR_X" têm que contar.
+const REAL_FAILURE = /error|erro|failed|falhou|falha|exception|traceback|cannot|can'?t|could not|unable|denied|not found|no such|fatal|panic|ENOENT|EACCES|syntax/i;
+
+/**
+ * Erro que não vale como sinal de armadilha: mau uso da tool de edição, ou `Exit code 1` sem sinal de falha real.
+ * Conservador: qualquer outro código de saída (ex.: 11) e qualquer texto com palavra de falha continuam valendo.
+ */
+export function isTrivialError(tool: string, text: string): boolean {
+  if (EDIT_TOOLS.test(tool) && TOOL_MISUSE.test(text)) return true;
+  if (BASH_TOOLS.test(tool) && /^\s*Exit code 1\b/.test(text) && !REAL_FAILURE.test(text)) return true;
+  return false;
+}
+
 export interface Signal { kind: "erro→conserto" | "correção do usuário"; detail: string }
 
 /** Sinais determinísticos (sem modelo) de que o turno contém algo reutilizável. */
@@ -28,14 +58,15 @@ export function extractSignals(turn: TurnRecord): Signal[] {
   const seq: { id: string; name: string; error: boolean; text: string }[] = [];
   for (const m of turn.messages) {
     if (typeof m.content === "string") {
-      if (CORRECTION_START.test(m.content) || CONVENTION.test(m.content)) signals.push({ kind: "correção do usuário", detail: cut(m.content.replace(/\s+/g, " "), 240) });
+      if (isCorrection(m.content) || CONVENTION.test(m.content)) signals.push({ kind: "correção do usuário", detail: cut(m.content.replace(/\s+/g, " "), 240) });
       continue;
     }
     for (const b of m.content) {
       if (b.type === "tool_use") names.set(b.id, b.name);
       else if (b.type === "tool_result") {
         const text = resultText(b.content);
-        seq.push({ id: b.tool_use_id, name: names.get(b.tool_use_id) ?? "?", error: !!b.is_error && !DENIAL.test(text), text });
+        const name = names.get(b.tool_use_id) ?? "?";
+        seq.push({ id: b.tool_use_id, name, error: !!b.is_error && !DENIAL.test(text) && !isTrivialError(name, text), text });
       }
     }
   }
