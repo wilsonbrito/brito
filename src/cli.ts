@@ -25,7 +25,7 @@ import { applyProposal, describeProposal, proposeConsolidation, pruneCandidates,
 import { defaultComplete, reflect, shouldReflect, type Complete } from "./skills/learn.js";
 import { claudeCliComplete } from "./skills/learn-cli.js";
 import type { TurnRecord } from "./agent/loop.js";
-import { buildSystemPrompt } from "./agent/prompt.js";
+import { buildSystemPrompt, graphStatsLine } from "./agent/prompt.js";
 import { allTools } from "./tools/registry.js";
 import { ui, c, fmtTokens } from "./ui/ui.js";
 import { runRepl, type ReplBackend } from "./repl.js";
@@ -326,7 +326,8 @@ async function runViaClaude(root: string, promptParts: string[], yes: boolean) {
   await graph.close();
 
   const session = new ClaudeSession({
-    root, approvalSock: approval.path, stats: `Já indexado: ${syms} símbolos, ${notes} notas.`,
+    // Foto da abertura: o índice é atualizado pelo servidor MCP (outro processo) e este processo não reabre o banco.
+    root, approvalSock: approval.path, stats: graphStatsLine(Number(syms), Number(notes), "start"),
     mcpCommand: { command: process.execPath, args: [...process.execArgv, process.argv[1], "mcp-serve", "-d", root] },
   });
   loadProjectAgents(root);
@@ -400,19 +401,21 @@ program
     const root = rootOf(o);
     const startedAt = Date.now();
     const graph = await GraphStore.open(root);
-    const sync = async () => { await indexProject(root, graph); };
+    // A contagem do prompt acompanha cada sincronização: sem isso o modelo veria "0 símbolos" a sessão inteira
+    // em projeto que começou vazio e nasceu código depois.
+    let symCount = 0, noteCount = 0;
+    const sync = async () => { symCount = (await indexProject(root, graph)).symbols; };
     ui.info("sincronizando grafo…");
     await sync(); // incremental: barato quando nada mudou
-    const [{ n: syms }] = await graph.run("MATCH (s:Symbol) RETURN count(s) AS n");
     const [{ n: notes }] = await graph.run("MATCH (s:Note) RETURN count(s) AS n");
+    noteCount = Number(notes);
 
     // `io.ask` é substituída pelo REPL (dock); em prompt único cai na pergunta simples.
     if (o.yes) perms.mode = "bypass";
     const io = { ask: async (q: string, _opts?: { force?: boolean }) => perms.mode === "bypass" || plainAsk(q) };
     const ctx: ToolContext = { root, graph, ask: (q, opts) => io.ask(q, opts), sync, dirty: false, loadedSkills: new Set() };
-    const stats = `Já indexado: ${syms} símbolos, ${notes} notas.`;
-    // Função: o índice de skills é relido a cada passo e reflete skills criadas na sessão.
-    const agent = new Agent(() => buildSystemPrompt(root, stats, skillsIndex(root)) + (perms.mode === "plan" ? PLAN_NOTE : ""), ctx);
+    // Função: o índice de skills e a contagem do grafo são relidos a cada passo e refletem o que mudou na sessão.
+    const agent = new Agent(() => buildSystemPrompt(root, graphStatsLine(symCount, noteCount, "now"), skillsIndex(root)) + (perms.mode === "plan" ? PLAN_NOTE : ""), ctx);
     loadProjectAgents(root);
 
     /** Depois de tarefas complexas (ou uso de skill), propõe criar/melhorar skills. */
@@ -463,7 +466,7 @@ program
     await runRepl(backend, {
       root, yes: !!o.yes, startedAt, io,
       banner: {
-        dir: root, symbols: Number(syms), notes: Number(notes), tools: allTools().map((t) => t.name),
+        dir: root, symbols: symCount, notes: noteCount, tools: allTools().map((t) => t.name),
         skills: skillInfo(root), agents: listAgents().map((a) => a.name),
       },
     });

@@ -1,6 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
 
+/**
+ * Frase sobre o grafo para o system prompt. "0 símbolos" sem contexto faz o modelo concluir que o grafo é inútil, mas o
+ * projeto pode só estar vazio no início (e o grafo se atualiza sozinho a cada edição). Por isso: rótulo do momento da
+ * contagem e, quando vazio, a orientação de consultar mesmo assim.
+ * `start` = foto tirada na abertura da sessão (backend do claude: o servidor MCP atualiza o índice em outro processo);
+ * `now` = contagem atualizada após cada sincronização.
+ */
+export function graphStatsLine(syms: number, notes: number, when: "start" | "now" = "now"): string {
+  if (syms === 0 && notes === 0) {
+    return `O grafo estava vazio ${when === "start" ? "na abertura da sessão" : "na última sincronização"} (projeto novo ou sem código suportado). Ele se atualiza sozinho conforme arquivos são criados e editados: consulte-o com graph_search em vez de supor que está vazio.`;
+  }
+  return `${when === "start" ? "Na abertura da sessão" : "Agora"}: ${syms} símbolos e ${notes} notas indexados. O grafo se atualiza sozinho após edições.`;
+}
+
 export function buildSystemPrompt(root: string, graphStats: string, skills = ""): string {
   let projectDoc = "";
   for (const f of ["BRITO.md", "CLAUDE.md", "AGENTS.md"]) {

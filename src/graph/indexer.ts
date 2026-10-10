@@ -4,7 +4,10 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { createRequire } from "node:module";
+import { spawnSync } from "node:child_process";
 import { GraphStore } from "./store.js";
+import { SFC_EXT, componentName, splitSfc, templateCalleeNames } from "./sfc.js";
+import { Aliases, aliasCandidates } from "./aliases.js";
 
 const require = createRequire(import.meta.url);
 const WASM_DIR = path.dirname(require.resolve("tree-sitter-wasms/package.json")) + "/out";
@@ -15,6 +18,8 @@ const EXT: Record<string, Lang> = {
   ".tsx": "tsx", ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
   ".py": "python",
 };
+/** Tudo que o grafo indexa: código em EXT e os scripts de componentes (.svelte/.vue/.astro). Usado também nas instruções do MCP. */
+export const INDEXED_EXTENSIONS = [...Object.keys(EXT), ...SFC_EXT];
 
 interface Sym { id: string; name: string; kind: string; file: string; startLine: number; endLine: number }
 interface Call { callerId: string | null; callee: string; obj: string; file: string }
@@ -145,20 +150,27 @@ function extract(root: Parser.SyntaxNode, lang: Lang, file: string): { syms: Sym
   return { syms, calls, imports, bindings };
 }
 
-/** Resolve import relativo ("./foo", "../a/b", ".mod") para um arquivo indexado. */
-function resolveImport(from: string, spec: string, known: Set<string>): string | null {
+/**
+ * Resolve um import para um arquivo indexado: relativo ("./foo", "../a/b", ".mod") ou por alias ("$lib/a", "@/a", "#x/a";
+ * ver aliases.ts). Pacote externo (react, zod…) não casa com nada indexado e volta null.
+ */
+function resolveImport(from: string, spec: string, known: Set<string>, aliases?: Aliases): string | null {
   const dir = path.posix.dirname(from);
-  let base: string;
+  let bases: string[];
   if (spec.startsWith(".")) {
     if (from.endsWith(".py")) {
       const dots = spec.match(/^\.+/)![0].length;
       const rest = spec.slice(dots).replace(/\./g, "/");
-      base = path.posix.normalize(path.posix.join(dir, ...Array(dots - 1).fill(".."), rest));
-    } else base = path.posix.normalize(path.posix.join(dir, spec));
-  } else return null;
-  base = base.replace(/\.(m|c)?jsx?$/, "");
-  const cands = [base, ...Object.keys(EXT).map((e) => base + e), ...Object.keys(EXT).map((e) => `${base}/index${e}`), `${base}/__init__.py`];
-  return cands.find((c) => known.has(c)) ?? null;
+      bases = [path.posix.normalize(path.posix.join(dir, ...Array(dots - 1).fill(".."), rest))];
+    } else bases = [path.posix.normalize(path.posix.join(dir, spec))];
+  } else bases = aliases ? aliasCandidates(aliases.forFile(from), spec) : [];
+  for (const raw of bases) {
+    const base = raw.replace(/\.(m|c)?jsx?$/, "");
+    const cands = [base, ...INDEXED_EXTENSIONS.map((e) => base + e), ...INDEXED_EXTENSIONS.map((e) => `${base}/index${e}`), `${base}/__init__.py`];
+    const hit = cands.find((c) => known.has(c));
+    if (hit) return hit;
+  }
+  return null;
 }
 
 const INDEXER_VERSION = "v4";
@@ -172,15 +184,39 @@ export interface IndexStats {
 
 interface StoredFile { hash: string; calls: string[]; imports: string[]; bindings: string[] }
 
-async function scan(root: string) {
-  const files = await fg(["**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py}"], {
-    cwd: root, ignore: ["**/node_modules/**", "**/dist/**", "**/build/**", "**/.git/**", "**/.brito/**", "**/__pycache__/**", "**/*.d.ts", "**/.venv/**"],
-  });
+const EXT_GLOB = INDEXED_EXTENSIONS.map((e) => e.slice(1)).join(",");
+const EXT_RE = new RegExp(`\\.(${INDEXED_EXTENSIONS.map((e) => e.slice(1)).join("|")})$`);
+/** Pastas que nunca entram, mesmo que estejam no git. */
+const HARD_IGNORE = ["**/node_modules/**", "**/dist/**", "**/build/**", "**/.git/**", "**/.brito/**", "**/__pycache__/**", "**/*.d.ts", "**/.venv/**"];
+const HARD_IGNORE_RE = /(^|\/)(node_modules|dist|build|\.git|\.brito|__pycache__|\.venv)(\/|$)|\.d\.ts$/;
+
+/**
+ * Arquivos que o git considera parte do projeto: rastreados + novos que não estão no .gitignore. Assim o grafo não
+ * indexa o que o projeto ignora (gerado, vendorizado, privado), em qualquer linguagem. null = não é repositório git,
+ * git indisponível ou `BRITO_INDEX_IGNORED=1` (indexa tudo, como antes).
+ */
+function gitListed(root: string): string[] | null {
+  if (process.env.BRITO_INDEX_IGNORED === "1") return null;
+  const r = spawnSync("git", ["ls-files", "-co", "--exclude-standard", "-z"], { cwd: root, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+  if (r.error || r.status !== 0) return null;
+  return r.stdout.split("\0").filter(Boolean);
+}
+
+async function sourceFiles(root: string): Promise<string[]> {
+  const viaGit = gitListed(root);
+  // `ls-files -c` ainda cita arquivo rastreado que foi apagado do disco: confere se existe.
+  if (viaGit) return viaGit.filter((f) => EXT_RE.test(f) && !HARD_IGNORE_RE.test(f) && fs.existsSync(path.join(root, f)));
+  return fg([`**/*.{${EXT_GLOB}}`], { cwd: root, ignore: HARD_IGNORE });
+}
+
+/** O hash de cada arquivo inclui a assinatura dos aliases dele: editar o tsconfig reindexa só quem depende dele. */
+async function scan(root: string, aliases: Aliases) {
+  const files = await sourceFiles(root);
   const out = new Map<string, { src: string; hash: string }>();
   for (const rel of files) {
     const src = fs.readFileSync(path.join(root, rel), "utf8");
     if (src.length > 1_000_000) continue;
-    out.set(rel, { src, hash: crypto.createHash("sha1").update(src).digest("hex") + ":" + INDEXER_VERSION });
+    out.set(rel, { src, hash: crypto.createHash("sha1").update(src).digest("hex") + ":" + INDEXER_VERSION + ":" + aliases.forFile(rel).signature });
   }
   return out;
 }
@@ -193,7 +229,8 @@ const count = async (store: GraphStore, q: string) => Number((await store.run(q)
  * como diff contra o banco.
  */
 export async function indexProject(root: string, store: GraphStore, opts: IndexOptions = {}): Promise<IndexStats> {
-  const current = await scan(root);
+  const aliases = new Aliases(root);
+  const current = await scan(root, aliases);
   if (opts.full) await store.clearCode();
 
   const stored = new Map<string, StoredFile>();
@@ -231,13 +268,23 @@ export async function indexProject(root: string, store: GraphStore, opts: IndexO
   // 2. Parseia e grava só o que mudou.
   for (const rel of [...added, ...changed]) {
     const { src, hash } = current.get(rel)!;
-    const lang = EXT[path.extname(rel)];
-    const tree = (await getParser(lang)).parse(src);
+    const ext = path.extname(rel);
+    // Componente (.svelte/.vue/.astro): o parser vê só os blocos de script; o template vira chamadas de um símbolo próprio.
+    const sfc = SFC_EXT.has(ext) ? splitSfc(src, ext) : null;
+    const lang: Lang = sfc ? (sfc.tsx ? "tsx" : "typescript") : EXT[ext];
+    const tree = (await getParser(lang)).parse(sfc ? sfc.script : src);
     const info = extract(tree.rootNode, lang, rel);
     tree.delete();
+    if (sfc) {
+      const name = componentName(rel);
+      const comp: Sym = { id: `${rel}::${name}:1`, name, kind: "component", file: rel, startLine: 1, endLine: src.split("\n").length };
+      const known = new Set([...info.syms.filter((s) => s.kind === "function" || s.kind === "class").map((s) => s.name), ...info.bindings.map((b) => b[0])]);
+      for (const callee of templateCalleeNames(sfc.template, known)) info.calls.push({ callerId: comp.id, callee, obj: "", file: rel });
+      info.syms.push(comp);
+    }
     const calls = [...new Set(info.calls.filter((c) => c.callerId).map((c) => [c.callerId, c.callee, c.obj].join(SEP)))];
     const bindings = [...new Set(info.bindings.map((b) => b.join(SEP)))];
-    await store.run("CREATE (:File {path:$p, lang:$l, hash:$h, calls:$c, imports:$i, bindings:$b})", { p: rel, l: lang, h: hash, c: calls, i: [...new Set(info.imports)], b: bindings });
+    await store.run("CREATE (:File {path:$p, lang:$l, hash:$h, calls:$c, imports:$i, bindings:$b})", { p: rel, l: sfc ? ext.slice(1) : lang, h: hash, c: calls, i: [...new Set(info.imports)], b: bindings });
     for (const s of info.syms) {
       await store.run("CREATE (:Symbol {id:$id, name:$n, kind:$k, file:$f, startLine:$s, endLine:$e})", { id: s.id, n: s.name, k: s.kind, f: s.file, s: s.startLine, e: s.endLine });
       await store.run("MATCH (f:File {path:$f}), (s:Symbol {id:$id}) CREATE (f)-[:DEFINES]->(s)", { f: rel, id: s.id });
@@ -280,8 +327,8 @@ export async function indexProject(root: string, store: GraphStore, opts: IndexO
     if (!obj) {
       const b = binds.get(callee);
       if (b) {
-        if (!b.spec.startsWith(".")) return []; // pacote externo
-        const tf = resolveImport(file, b.spec, known);
+        const tf = resolveImport(file, b.spec, known, aliases);
+        if (!tf && !b.spec.startsWith(".")) return []; // pacote externo (não é relativo nem alias do projeto)
         const ids = tf ? lookup(tf, b.imported === "default" ? callee : b.imported) : [];
         return ids.length ? ids : heuristic(file, callee, false); // re-export/barrel: cai no fallback
       }
@@ -295,8 +342,8 @@ export async function indexProject(root: string, store: GraphStore, opts: IndexO
     }
     const b = binds.get(obj);
     if (b) {
-      if (!b.spec.startsWith(".")) return []; // fs.readFileSync, z.string()…
-      const tf = resolveImport(file, b.spec, known);
+      const tf = resolveImport(file, b.spec, known, aliases);
+      if (!tf && !b.spec.startsWith(".")) return []; // fs.readFileSync, z.string()…
       if (tf) {
         const ids = lookup(tf, callee).concat(lookup(tf, `${b.imported}.${callee}`));
         if (ids.length) return ids;
@@ -313,7 +360,7 @@ export async function indexProject(root: string, store: GraphStore, opts: IndexO
       for (const id of resolveCall(file, callerId, callee, obj ?? "")) if (id !== callerId) wantCalls.add(callerId + SEP + id);
     }
     for (const spec of f.imports) {
-      const target = resolveImport(file, spec, known);
+      const target = resolveImport(file, spec, known, aliases);
       if (target && target !== file) wantImports.add(file + SEP + target);
     }
   }

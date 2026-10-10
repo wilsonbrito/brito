@@ -7,10 +7,23 @@ import "../tools/graph.js";
 import "../tools/skills.js";
 import { allTools, execTool, type ToolContext } from "../tools/registry.js";
 import { GraphStore } from "../graph/store.js";
-import { indexProject } from "../graph/indexer.js";
+import { INDEXED_EXTENSIONS, indexProject } from "../graph/indexer.js";
 import { MODE_ENV, modeFromEnv, perms } from "../permissions.js";
 
 export const MCP_NAME = "brito";
+
+/**
+ * Instruções que o host (ex.: claude CLI) injeta no prompt junto com as tools. Sem isso o modelo só descobre o grafo se
+ * procurar: as tools MCP podem ficar atrás de uma busca de tools e nunca ser chamadas. Genérico: vale para qualquer projeto.
+ */
+export const MCP_INSTRUCTIONS = [
+  "Brito: grafo de código, memória e skills do projeto.",
+  "- Para localizar código, use graph_search/graph_context antes de ler arquivos; antes de alterar, meça o impacto com graph_callers/graph_impact. O grafo se atualiza sozinho após edições (graph_index só força).",
+  `- O grafo cobre ${INDEXED_EXTENSIONS.join(", ")} (em .svelte/.vue/.astro, o script e as chamadas do template). Imports relativos e por alias (paths/baseUrl do tsconfig, imports do package.json, $lib do SvelteKit) viram arestas. Outras linguagens e arquivos ignorados pelo .gitignore não entram: use busca de texto para eles.`,
+  "- recall/remember: notas duráveis (decisões, convenções, bugs descobertos). Consulte recall ao começar uma tarefa.",
+  "- skill_load: carregue a skill antes de uma tarefa que ela cobre. No modo \"tudo liberado\", skill_save vira proposta pendente que o usuário aprova com /skills approve.",
+].join("\n");
+
 /** Prefixo com que o claude CLI enxerga as tools deste servidor. */
 export const MCP_PREFIX = `mcp__${MCP_NAME}__`;
 /** Tool usada como --permission-prompt-tool: encaminha o pedido ao REPL do Brito. */
@@ -45,7 +58,7 @@ export async function serveMcp(root: string): Promise<void> {
     sync: async () => { await indexProject(root, graph); },
   };
 
-  const server = new Server({ name: MCP_NAME, version: "0.1.0" }, { capabilities: { tools: {} } });
+  const server = new Server({ name: MCP_NAME, version: "0.1.0" }, { capabilities: { tools: {} }, instructions: MCP_INSTRUCTIONS });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [{
       name: APPROVE_TOOL,
