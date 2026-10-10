@@ -24,6 +24,14 @@ export const MCP_INSTRUCTIONS = [
   "- skill_load: carregue a skill antes de uma tarefa que ela cobre. No modo \"tudo liberado\", skill_save vira proposta pendente que o usuário aprova com /skills approve.",
 ].join("\n");
 
+/**
+ * O claude CLI adia as tools MCP atrás de uma busca (ToolSearch): o modelo só as usa se pensar em procurá-las, e o grafo
+ * ficava sem uso. `_meta["anthropic/alwaysLoad"]` (documentado em code.claude.com/docs/en/mcp) mantém no contexto as
+ * tools de consulta, que são baratas e de uso frequente. As de escrita e a de aprovação (interna) continuam adiadas.
+ */
+export const ALWAYS_LOAD_META = "anthropic/alwaysLoad";
+export const alwaysLoaded = (tool: string) => /^(graph_|recall$|remember$|skill_load$)/.test(tool);
+
 /** Prefixo com que o claude CLI enxerga as tools deste servidor. */
 export const MCP_PREFIX = `mcp__${MCP_NAME}__`;
 /** Tool usada como --permission-prompt-tool: encaminha o pedido ao REPL do Brito. */
@@ -68,6 +76,7 @@ export async function serveMcp(root: string): Promise<void> {
       name: t.name,
       description: t.description,
       inputSchema: z.toJSONSchema(t.schema) as { type: "object"; [k: string]: unknown },
+      ...(alwaysLoaded(t.name) ? { _meta: { [ALWAYS_LOAD_META]: true } } : {}),
     }))],
   }));
   server.setRequestHandler(CallToolRequestSchema, async (req) => {

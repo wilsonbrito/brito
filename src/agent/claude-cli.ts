@@ -66,7 +66,8 @@ export function recordStreamEvent(turn: TurnRecord, ev: any, loadedSkills: Set<s
  * e o modo de permissão do REPL (vale por turno, pois cada turno sobe um claude novo com esta config).
  */
 export function mcpConfig(cmd: { command: string; args: string[] }, approvalSock: string, mode: PermMode) {
-  return { mcpServers: { [MCP_NAME]: { type: "stdio", command: cmd.command, args: cmd.args, env: { BRITO_APPROVE_SOCK: approvalSock, [MODE_ENV]: mode } } } };
+  // alwaysLoad: sem isso o claude adia as tools do Brito atrás do ToolSearch e o modelo raramente chega ao grafo.
+  return { mcpServers: { [MCP_NAME]: { type: "stdio", command: cmd.command, args: cmd.args, alwaysLoad: true, env: { BRITO_APPROVE_SOCK: approvalSock, [MODE_ENV]: mode } } } };
 }
 
 export interface ClaudeBackendOpts {

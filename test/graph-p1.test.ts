@@ -11,7 +11,8 @@ import { GraphStore } from "../src/graph/store.js";
 import { INDEXED_EXTENSIONS, indexProject } from "../src/graph/indexer.js";
 import { componentName, splitSfc, templateCalleeNames } from "../src/graph/sfc.js";
 import { graphStatsLine } from "../src/agent/prompt.js";
-import { MCP_INSTRUCTIONS } from "../src/mcp/server.js";
+import { ALWAYS_LOAD_META, MCP_INSTRUCTIONS, alwaysLoaded } from "../src/mcp/server.js";
+import { mcpConfig } from "../src/agent/claude-cli.js";
 import { MODE_ENV } from "../src/permissions.js";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -187,5 +188,32 @@ test("servidor MCP real envia as instructions ao cliente", { timeout: 60_000 }, 
   try {
     await client.connect(transport);
     assert.equal(client.getInstructions(), MCP_INSTRUCTIONS);
+  } finally { await client.close(); p.cleanup(); }
+});
+
+// ───────────── Item 6b: tools de consulta sempre carregadas (sem ToolSearch) ─────────────
+
+test("alwaysLoaded cobre as tools de consulta e deixa de fora as de escrita e a de aprovação", () => {
+  for (const t of ["graph_search", "graph_context", "graph_callers", "graph_callees", "graph_impact", "graph_query", "graph_index", "recall", "remember", "skill_load"]) assert.equal(alwaysLoaded(t), true, t);
+  for (const t of ["skill_save", "skill_delete", "approve", "bash", "recalled"]) assert.equal(alwaysLoaded(t), false, t);
+});
+
+test("mcpConfig marca o servidor como alwaysLoad (documentado em code.claude.com/docs/en/mcp)", () => {
+  const cfg = mcpConfig({ command: "node", args: ["cli.js", "mcp-serve"] }, "/tmp/sock", "manual");
+  assert.equal(cfg.mcpServers.brito.alwaysLoad, true);
+});
+
+test("servidor MCP real lista _meta anthropic/alwaysLoad só nas tools de consulta", { timeout: 60_000 }, async () => {
+  const p = project({ "a.ts": "export const a = 1;\n" });
+  const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+  delete env[MODE_ENV];
+  const client = new Client({ name: "teste", version: "0.0.0" });
+  const transport = new StdioClientTransport({ command: path.join(REPO, "node_modules/.bin/tsx"), args: [path.join(REPO, "src/cli.ts"), "mcp-serve", "-d", p.root], env, cwd: REPO, stderr: "ignore" });
+  try {
+    await client.connect(transport);
+    const { tools } = await client.listTools();
+    const flagged = (n: string) => (tools.find((t) => t.name === n)?._meta as Record<string, unknown> | undefined)?.[ALWAYS_LOAD_META];
+    for (const n of ["graph_search", "graph_impact", "recall", "skill_load"]) assert.equal(flagged(n), true, n);
+    for (const n of ["skill_save", "skill_delete", "approve"]) { assert.ok(tools.some((t) => t.name === n), `${n} existe`); assert.equal(flagged(n), undefined, n); }
   } finally { await client.close(); p.cleanup(); }
 });
