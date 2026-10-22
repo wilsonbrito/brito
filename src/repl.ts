@@ -155,14 +155,14 @@ export async function runRepl(b: ReplBackend, o: ReplOpts) {
   const echo = (text: string) => {
     const lines = text.split("\n");
     const shown = lines.length > 4 ? [...lines.slice(0, 3), c.dim(`… (+${lines.length - 3} linhas)`)] : lines;
-    // balão do usuário: mesmo formato da caixa do Brito, em vermelho e com o nome de usuário da máquina
+    // balão do usuário (sem borda lateral, para copiar limpo): mesmo formato da caixa do Brito, em vermelho e com o nome de usuário da máquina
     const label = ` ${userName()} `;
-    const room = Math.max(10, cols() - 2);
+    const room = Math.max(10, cols() - 1);
     const body = shown.flatMap((l) => (l.length <= room ? [l] : l.match(new RegExp(`.{1,${room}}`, "gs")) ?? [l]));
     ui.print(
-      "\n" + c.err("╭─") + c.bold(c.err(label)) + c.err("─".repeat(Math.max(2, cols() - label.length - 2))) + "\n" +
-      body.map((l) => c.err("│ ") + c.bold(c.err(l))).join("\n") + "\n" +
-      c.err("╰" + "─".repeat(cols() - 1)),
+      "\n" + c.err("──") + c.bold(c.err(label)) + c.err("─".repeat(Math.max(2, cols() - label.length - 2))) + "\n" +
+      body.map((l) => c.bold(c.err(l))).join("\n") + "\n" +
+      c.err("─".repeat(cols())),
     );
   };
 

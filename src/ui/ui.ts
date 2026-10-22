@@ -1,6 +1,7 @@
 import { BOLD, CODE, ITALIC, OFF, c, cols, palette, useColor } from "./theme.js";
 import type { Dock } from "./dock.js";
 import { renderBanner, type BannerInfo } from "./banner.js";
+import { renderTable } from "./table.js";
 import stringWidth from "string-width";
 
 export const NAME = "Brito";
@@ -145,6 +146,42 @@ class UI {
   private skip = false;    // descarta o resto da linha do ``` (nome da linguagem)
   private bol = true;      // só espaços até agora nesta linha
   private prev = " ";      // último caractere resolvido
+  // tabelas markdown: linhas que começam com `|` são guardadas inteiras e desenhadas alinhadas no fim da tabela
+  private rawBol = true;   // início de linha no texto bruto do modelo
+  private lead = "";       // espaços no início da linha, antes de decidir se é tabela
+  private tblLine: string | null = null; // linha de tabela em andamento
+  private tbl: string[] = [];            // linhas completas da tabela atual
+
+  /** Primeira etapa do streaming: separa as linhas de tabela; o resto segue para o markdown. */
+  private raw(ch: string) {
+    if (this.tblLine !== null) {
+      if (ch === "\n") { this.tbl.push(this.tblLine); this.tblLine = null; this.rawBol = true; }
+      else this.tblLine += ch;
+      return;
+    }
+    if (this.rawBol && !this.st.fence) {
+      if (ch === " " || ch === "\t") { this.lead += ch; return; }
+      if (ch === "|") { this.tblLine = "|"; this.lead = ""; return; }
+    }
+    this.flushTable();
+    if (this.lead) { for (const x of this.lead) this.feed(x); this.lead = ""; }
+    this.rawBol = ch === "\n";
+    this.feed(ch);
+  }
+
+  /** Fecha a tabela pendente: desenha alinhada ou, se não for tabela de verdade, devolve as linhas como texto. */
+  private flushTable() {
+    if (this.tblLine !== null) { this.tbl.push(this.tblLine); this.tblLine = null; }
+    if (!this.tbl.length) return;
+    const lines = this.tbl;
+    this.tbl = [];
+    const drawn = renderTable(lines, cols() - 1);
+    if (!drawn) { for (const l of lines) for (const x of l + "\n") this.feed(x); return; }
+    this.emitWord();
+    if (!this.lineStart) this.out("\n");
+    for (const l of drawn) this.out(l + "\n");
+    this.lineStart = true; this.lineW = 0; this.prev = "\n"; this.bol = true;
+  }
 
   private seq(): string {
     const { b, i, k, fence } = this.st;
@@ -161,6 +198,7 @@ class UI {
     this.st = { b: false, i: false, k: false, fence: false };
     this.run = { ch: "", n: 0, bol: false };
     this.wordStart = ""; this.skip = false; this.bol = true; this.prev = " ";
+    this.rawBol = true; this.lead = ""; this.tblLine = null; this.tbl = [];
   }
 
   /** Descarrega a palavra em andamento, quebrando a linha antes dela se não couber. */
@@ -169,8 +207,8 @@ class UI {
     const w = stringWidth(this.word);
     const room = cols() - 2;
     if (this.lineW > 0 && this.lineW + w > room) { this.out("\n"); this.lineStart = true; this.lineW = 0; }
-    if (this.lineStart) { this.out(c.accent("│ ")); this.lineStart = false; }
-    // o estilo é reaplicado por palavra: a borda e os espaços não herdam a cor
+    this.lineStart = false; // sem borda lateral: copiar o texto do terminal sai limpo
+    // o estilo é reaplicado por palavra: os espaços não herdam a cor
     this.out(this.wordStart + this.word + (this.active() ? OFF : ""));
     this.lineW += w;
     this.word = "";
@@ -216,11 +254,11 @@ class UI {
       this.st.k = false; // código inline não atravessa linhas
       if (blank && !this.st.fence) { this.st.b = false; this.st.i = false; } // linha em branco encerra ênfase aberta
       this.wordStart = this.seq();
-      this.out((this.lineStart ? c.accent("│") : "") + "\n");
+      this.out("\n");
       this.lineStart = true; this.lineW = 0;
     } else if (ch === " ") {
       this.emitWord();
-      if (this.lineStart) { this.out(c.accent("│ ")); this.lineStart = false; }
+      this.lineStart = false;
       if (this.lineW + 1 > cols() - 2) { this.out("\n"); this.lineStart = true; this.lineW = 0; }
       else { this.out(" "); this.lineW++; }
     } else { this.word += ch; this.bol = false; }
@@ -231,19 +269,21 @@ class UI {
     if (!this.textOpen) {
       this.clear();
       const label = ` ${NAME} `;
-      this.out(c.accent("╭─") + c.bold(c.light(label)) + c.accent("─".repeat(Math.max(2, cols() - label.length - 2))) + "\n");
+      this.out(c.accent("──") + c.bold(c.light(label)) + c.accent("─".repeat(Math.max(2, cols() - label.length - 2))) + "\n");
       this.textOpen = true; this.lineStart = true; this.lineW = 0; this.word = "";
       this.resetStyle();
     }
-    for (const ch of chunk) this.feed(ch);
+    for (const ch of chunk) this.raw(ch);
   }
   textEnd() {
     if (!this.textOpen) return;
+    this.flushTable();
+    if (this.lead) { for (const x of this.lead) this.feed(x); this.lead = ""; }
     if (this.run.n) this.resolve("\n"); // marcador no fim da resposta: fecha se havia abertura, senão fica literal
     this.emitWord();
     this.resetStyle();
     if (!this.lineStart) this.out("\n");
-    this.out(c.accent("╰" + "─".repeat(cols() - 1)) + "\n");
+    this.out(c.accent("─".repeat(cols())) + "\n");
     this.textOpen = false;
     this.draw();
   }
@@ -278,15 +318,15 @@ class UI {
     if (!body) return;
     this.textEnd();
     const w = cols();
-    const wrapped = body.split("\n").flatMap((l) => wrapLine(l.trimEnd(), w - 4));
+    const wrapped = body.split("\n").flatMap((l) => wrapLine(l.trimEnd(), w - 1));
     const MAX = 10;
     const cut = !this.reasoning.full && wrapped.length > MAX;
     const lines = cut ? wrapped.slice(0, MAX) : wrapped;
     const label = " raciocínio ";
-    this.print(c.dim(`┌─${label}${"─".repeat(Math.max(0, w - 3 - label.length))}┐`));
-    for (const l of lines) this.print(c.dim(`│ ${l}`));
-    if (cut) this.print(c.dim(`│ … +${wrapped.length - MAX} linhas (/reasoning full mostra tudo)`));
-    this.print(c.dim(`└${"─".repeat(w - 2)}┘`));
+    this.print(c.dim(`──${label}${"─".repeat(Math.max(0, w - 2 - label.length))}`));
+    for (const l of lines) this.print(c.dim(l));
+    if (cut) this.print(c.dim(`… +${wrapped.length - MAX} linhas (/reasoning full mostra tudo)`));
+    this.print(c.dim("─".repeat(w)));
   }
 
   info(msg: string) { this.textEnd(); this.print(c.muted(msg)); }
