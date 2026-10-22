@@ -41,10 +41,8 @@ const pad = (s: string, w: number, align: "l" | "r" | "c") => {
   return s + " ".repeat(gap);
 };
 
-const GAP = "   ";
-
 /**
- * Desenha uma tabela markdown em colunas alinhadas, sem bordas laterais (copiar o texto sai limpo).
+ * Desenha uma tabela markdown como grade com bordas (┌─┬─┐ / │ / ├─┼─┤ / └─┴─┘), como o Claude Code.
  * Cabe em `width` colunas: as colunas mais largas encolhem e o texto quebra dentro delas.
  * Devolve null se as linhas não formam uma tabela (falta a linha `|---|---|`).
  */
@@ -62,7 +60,7 @@ export function renderTable(lines: string[], width: number): string[] | null {
   const rows = [norm(head), ...lines.slice(2).map(cells).map(norm)];
 
   const w = Array.from({ length: n }, (_, i) => Math.max(1, ...rows.map((r) => stringWidth(r[i]))));
-  const room = Math.max(n, width - GAP.length * (n - 1));
+  const room = Math.max(n, width - (3 * n + 1));
   // encolhe sempre a coluna mais larga até caber (mínimo de 8 colunas, ou menos se não houver espaço)
   const min = Math.max(1, Math.min(8, Math.floor(room / n)));
   while (w.reduce((a, b) => a + b, 0) > room) {
@@ -71,15 +69,20 @@ export function renderTable(lines: string[], width: number): string[] | null {
     w[i]--;
   }
 
-  const out: string[] = [];
+  const border = (l: string, m: string, r: string) => c.accent(l + w.map((x) => "─".repeat(x + 2)).join(m) + r);
+  const bar = c.accent("│");
+  const out: string[] = [border("┌", "┬", "┐")];
   rows.forEach((r, ri) => {
     const wrapped = r.map((cell, i) => wrap(cell, w[i]));
     const h = Math.max(...wrapped.map((x) => x.length));
     for (let k = 0; k < h; k++) {
-      const line = wrapped.map((x, i) => pad(x[k] ?? "", w[i], align[i])).join(GAP).trimEnd();
-      out.push(ri === 0 ? c.bold(line) : line);
+      const body = wrapped.map((x, i) => {
+        const cell = pad(x[k] ?? "", w[i], ri === 0 ? "c" : align[i]);
+        return " " + (ri === 0 ? c.bold(cell) : cell) + " ";
+      });
+      out.push(bar + body.join(bar) + bar);
     }
-    if (ri === 0) out.push(c.accent(w.map((x) => "─".repeat(x)).join(GAP)));
+    out.push(ri === rows.length - 1 ? border("└", "┴", "┘") : border("├", "┼", "┤"));
   });
   return out;
 }

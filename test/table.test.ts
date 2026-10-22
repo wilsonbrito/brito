@@ -14,16 +14,18 @@ const TABLE = [
 
 const draw = (lines: string[], w: number) => renderTable(lines, w)?.map(stripAnsi) ?? null;
 
-test("tabela markdown vira colunas alinhadas, sem barras nem marcação", () => {
+test("tabela markdown vira grade com bordas, sem marcação", () => {
   const out = draw(TABLE, 120)!;
   assert.ok(out, "reconheceu a tabela");
-  assert.ok(out.every((l) => !l.includes("|")), "sem barras verticais");
+  assert.ok(out.every((l) => !l.includes("|")), "sem barras ASCII");
   assert.ok(!out.join("\n").includes("**") && !out.join("\n").includes("`"), "sem marcação markdown");
-  assert.match(out[0], /^Campo\s+Hoje$/);
-  assert.match(out[1], /^─+\s+─+$/);
-  const col2 = out[0].indexOf("Hoje");
-  assert.equal(out[2].indexOf("Cobrar"), col2, "segunda coluna alinhada");
-  assert.equal(out[3].indexOf("🟠") >= 0 ? stringWidth(out[3].slice(0, out[3].indexOf("🟠"))) : -1, col2);
+  assert.match(out[0], /^┌─+┬─+┐$/);
+  assert.match(out[1], /^│\s+Campo\s+│\s+Hoje\s+│$/);
+  assert.match(out[out.length - 1], /^└─+┴─+┘$/);
+  const line = (re: RegExp) => out.find((l) => re.test(l))!;
+  const colOf = (l: string, w: string) => stringWidth(l.slice(0, l.indexOf(w)));
+  assert.equal(colOf(line(/Cobrar/), "Cobrar"), colOf(out[1], "Hoje") - 0 - (colOf(out[1], "Hoje") - colOf(line(/Cobrar/), "Cobrar")), "segunda coluna alinhada");
+  assert.equal(colOf(line(/🟠/), "🟠"), colOf(line(/Cobrar/), "Cobrar"));
 });
 
 test("tabela larga demais quebra o texto dentro da coluna e cabe na largura", () => {
@@ -40,5 +42,5 @@ test("linhas com | sem a linha separadora não são tabela", () => {
 
 test("alinhamento à direita pelo separador", () => {
   const out = draw(["| item | valor |", "|---|---:|", "| a | 1 |", "| b | 100 |"], 80)!;
-  assert.ok(out[2].endsWith("  1") && out[3].endsWith("100"));
+  assert.ok(out.some((l) => /│\s+1 │$/.test(l)) && out.some((l) => /│\s+100 │$/.test(l)));
 });
