@@ -3,7 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 type Msg = Anthropic.MessageParam;
 
 /** Imagem em base64 tem megabytes, mas custa ~1,6 mil tokens: troca o conteúdo por um marcador antes de medir ou resumir. */
-const stubImages = (_k: string, v: any) => (v && typeof v === "object" && v.type === "image" ? { type: "image", note: "x".repeat(6400) } : v);
+const stubImages = (_k: string, v: any) => (v && typeof v === "object" && (v.type === "image" || v.type === "document") && v.source ? { type: v.type, note: "x".repeat(6400) } : v);
 export const estimateTokens = (msgs: Msg[]) => Math.ceil(JSON.stringify(msgs, stubImages).length / 4);
 
 const MAX_OLD_RESULT = 1500;
@@ -38,7 +38,7 @@ export async function summarizeMiddle(client: Anthropic, model: string, msgs: Ms
     model,
     max_tokens: 2000,
     system: "Resuma a conversa de um agente de programação. Preserve: objetivo, decisões, arquivos/símbolos tocados, erros encontrados, estado atual e próximos passos. Seja denso.",
-    messages: [{ role: "user", content: JSON.stringify(middle, (_k, v) => (v && typeof v === "object" && v.type === "image" ? { type: "image", note: "[imagem omitida]" } : v)).slice(0, 150_000) }],
+    messages: [{ role: "user", content: JSON.stringify(middle, (_k, v) => (v && typeof v === "object" && (v.type === "image" || v.type === "document") && v.source ? { type: v.type, note: "[anexo omitido]" } : v)).slice(0, 150_000) }],
   });
   const summary = res.content.map((b) => (b.type === "text" ? b.text : "")).join("");
   return [...head, { role: "user", content: `[Resumo da conversa anterior]\n${summary}` }, { role: "assistant", content: "Entendido, continuando a partir do resumo." }, ...tail];

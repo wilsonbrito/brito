@@ -77,9 +77,9 @@ export class Agent {
     // Imagens arrastadas para o terminal chegam como caminhos no texto: anexa como blocos `image`. O registro do turno
     // (usado na reflexão) guarda só o texto, para não carregar base64.
     const { ok, tooBig } = splitOversize(findImages(userText, this.ctx.root));
-    for (const i of tooBig) this.log(`⚠ ${i.name} passa de 5 MB e não foi anexada`);
+    for (const i of tooBig) this.log(`⚠ ${i.name} passa do limite da API e não foi anexado`);
     if (ok.length) {
-      this.log(`🖼 ${ok.map((i) => `${i.name} (${fmtBytes(i.bytes)})`).join(", ")} anexada${ok.length > 1 ? "s" : ""}`);
+      this.log(`📎 ${ok.map((i) => `${i.name} (${fmtBytes(i.bytes)})`).join(", ")} anexado${ok.length > 1 ? "s" : ""}`);
       this.messages.push({ role: "user", content: [...ok.map(imageBlock), { type: "text", text: userText }] });
       turn.messages.push({ role: "user", content: userText });
     } else push({ role: "user", content: userText });

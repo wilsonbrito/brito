@@ -58,3 +58,13 @@ test("estimateTokens: uma imagem grande em base64 não dispara compactação", (
   const msgs = [{ role: "user" as const, content: [{ type: "image" as const, source: { type: "base64" as const, media_type: "image/png" as const, data: huge } }, { type: "text" as const, text: "oi" }] }];
   assert.ok(estimateTokens(msgs) < 5000);
 });
+
+test("PDF: reconhece caminho com espaço escapado e gera bloco document", () => {
+  const pdf = path.join(dir, "capitulo 6.pdf");
+  fs.writeFileSync(pdf, "%PDF-1.4");
+  const found = findImages(`${path.join(dir, "capitulo 6.pdf").replace(/ /g, "\\ ")}`);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].mediaType, "application/pdf");
+  assert.equal(imageBlock(found[0]).type, "document");
+  assert.equal(splitOversize(found).ok.length, 1);
+});

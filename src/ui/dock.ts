@@ -28,7 +28,7 @@ const ANSI = /\x1b\[[0-9;]*[A-Za-z]/y;
 
 const MAX_INPUT_ROWS = 8;
 const MAX_MENU = 7;
-const PASTE_RE = /\[(?:colado|imagem) #(\d+): [^\]]*\]/g;
+const PASTE_RE = /\[(?:colado|imagem|anexo) #(\d+): [^\]]*\]/g;
 
 export class Dock {
   onSubmit: (line: string) => void = () => {};
@@ -360,7 +360,7 @@ export class Dock {
     if (imgs.length) {
       const n = ++this.pasteN;
       this.pastes.set(n, imgs.map((i) => (/\s/.test(i.path) ? `"${i.path}"` : i.path)).join(" "));
-      this.insert(`[imagem #${n}: ${imgs.length === 1 ? imgs[0].name : `${imgs.length} imagens`}] `);
+      this.insert(`[anexo #${n}: ${imgs.length === 1 ? imgs[0].name : `${imgs.length} arquivos`}] `);
     } else if (lines >= 2 || text.length > 300) {
       const n = ++this.pasteN;
       this.pastes.set(n, text);

@@ -8,12 +8,15 @@ import { fileURLToPath } from "node:url";
  * entre aspas ou como file://). Aqui reconhecemos esses caminhos para anexar a imagem ao turno, como o Claude Code faz.
  */
 
-export type MediaType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
-const TYPES: Record<string, MediaType> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
-const IMG_EXT = /\.(png|jpe?g|gif|webp)$/i;
+export type MediaType = "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "application/pdf";
+const TYPES: Record<string, MediaType> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", pdf: "application/pdf" };
+const IMG_EXT = /\.(png|jpe?g|gif|webp|pdf)$/i;
 
-/** Limite da API por imagem (5 MB) e teto de anexos por mensagem. */
+/** Limite da API por imagem (5 MB), por PDF (32 MB) e teto de anexos por mensagem. */
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+export const MAX_PDF_BYTES = 32 * 1024 * 1024;
+export const limitOf = (i: { mediaType: MediaType }) => (i.mediaType === "application/pdf" ? MAX_PDF_BYTES : MAX_IMAGE_BYTES);
+export const isPdf = (i: { mediaType: MediaType }) => i.mediaType === "application/pdf";
 export const MAX_IMAGES = 5;
 
 export interface ImageRef { path: string; name: string; mediaType: MediaType; bytes: number }
@@ -67,10 +70,11 @@ export const fmtBytes = (n: number) => (n >= 1_048_576 ? `${(n / 1_048_576).toFi
 
 /** Separa o que dá para enviar do que passa do limite da API. */
 export function splitOversize(imgs: ImageRef[]): { ok: ImageRef[]; tooBig: ImageRef[] } {
-  return { ok: imgs.filter((i) => i.bytes <= MAX_IMAGE_BYTES), tooBig: imgs.filter((i) => i.bytes > MAX_IMAGE_BYTES) };
+  return { ok: imgs.filter((i) => i.bytes <= limitOf(i)), tooBig: imgs.filter((i) => i.bytes > limitOf(i)) };
 }
 
-/** Bloco `image` da API da Anthropic, com o arquivo em base64. */
+/** Bloco `image` (ou `document`, para PDF) da API da Anthropic, com o arquivo em base64. */
 export function imageBlock(img: ImageRef) {
-  return { type: "image" as const, source: { type: "base64" as const, media_type: img.mediaType, data: fs.readFileSync(img.path).toString("base64") } };
+  if (isPdf(img)) return { type: "document" as const, source: { type: "base64" as const, media_type: "application/pdf" as const, data: fs.readFileSync(img.path).toString("base64") } };
+  return { type: "image" as const, source: { type: "base64" as const, media_type: img.mediaType as Exclude<MediaType, "application/pdf">, data: fs.readFileSync(img.path).toString("base64") } };
 }

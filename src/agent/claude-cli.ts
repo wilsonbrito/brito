@@ -158,10 +158,10 @@ export class ClaudeSession {
     return new Promise((resolve) => {
       ui.turnStart();
       const { ok: imgs, tooBig } = splitOversize(findImages(text, this.o.root));
-      for (const i of tooBig) ui.warn(`${i.name} passa de 5 MB e não foi anexada`);
-      if (imgs.length) ui.info(`🖼 ${imgs.map((i) => `${i.name} (${fmtBytes(i.bytes)})`).join(", ")} anexada${imgs.length > 1 ? "s" : ""}`);
+      for (const i of tooBig) ui.warn(`${i.name} passa do limite da API e não foi anexado`);
+      if (imgs.length) ui.info(`📎 ${imgs.map((i) => `${i.name} (${fmtBytes(i.bytes)})`).join(", ")} anexado${imgs.length > 1 ? "s" : ""}`);
       // O claude vê a imagem pela tool Read: o prompt diz quais arquivos são imagens anexadas pelo usuário.
-      const prompt = imgs.length ? `${text}\n\n[O usuário anexou ${imgs.length > 1 ? "estas imagens" : "esta imagem"}; abra com a tool Read para vê-${imgs.length > 1 ? "las" : "la"}:\n${imgs.map((i) => `- ${i.path}`).join("\n")}]` : text;
+      const prompt = imgs.length ? `${text}\n\n[O usuário anexou ${imgs.length > 1 ? "estes arquivos" : "este arquivo"}; abra com a tool Read para vê-${imgs.length > 1 ? "las" : "la"}:\n${imgs.map((i) => `- ${i.path}`).join("\n")}]` : text;
       const cmd = claudeCommand(this.args(prompt, [...new Set(imgs.map((i) => path.dirname(i.path)))]));
       const child = (this.child = spawn(cmd.command, cmd.args, {
         cwd: this.o.root, stdio: ["ignore", "pipe", "pipe"],

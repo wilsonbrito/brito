@@ -189,10 +189,11 @@ export async function runRepl(b: ReplBackend, o: ReplOpts) {
     const [cmd, ...args] = line.split(/\s+/);
     const key = cmd.toLowerCase();
     if (key === "/sair" || key === "/exit") { await shutdown(); return; }
-    if (line.startsWith("/")) {
-      const run = common[key] ?? b.commands[key]?.run;
-      if (!run) { ui.warn(`comando desconhecido: ${cmd}. Digite /help.`); return; }
-      await run(args);
+    const run = line.startsWith("/") ? common[key] ?? b.commands[key]?.run : undefined;
+    if (run) { await run(args); return; }
+    // "/Users/x/arquivo.pdf" é caminho, não comando: segue como mensagem ao agente
+    if (line.startsWith("/") && !cmd.slice(1).includes("/")) {
+      ui.warn(`comando desconhecido: ${cmd}. Digite /help.`);
       return;
     }
     const ac = (running = new AbortController());
