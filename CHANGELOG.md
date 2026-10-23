@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 — 2026-10-23
 
 ### Added
 - **Automatic fallback to Qwen.** When Claude (API or `claude` CLI) fails on account/capacity (subscription limit, rate limit, credit, auth, overload, network), Brito warns and redoes the request on the `qwen` profile with the conversation so far. Once per session; `/model <claude>` goes back. Never on Ctrl+C or content errors.
