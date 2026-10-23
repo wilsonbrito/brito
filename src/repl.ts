@@ -67,12 +67,14 @@ export async function runRepl(b: ReplBackend, o: ReplOpts) {
   const modeColor: Record<PermMode, (t: string) => string> = { manual: c.muted, auto: c.ok, plan: c.warn, bypass: c.err };
   const modeChip = () => { const m = MODE_LABEL[perms.mode]; return modeColor[perms.mode](`${m.icon} ${m.name}`); };
   const status = () => ui.statusLine({
+    project: path.basename(o.root),
     mode: modeChip(),
     model: b.model(), ctxTokens: b.contextTokens(), ctxWindow: b.ctxWindow,
     input: b.usage().input, output: b.usage().output, cacheRead: b.usage().cacheRead, startedAt: o.startedAt, cost: b.cost?.(),
     extra: `${skillCount} ${skillCount === 1 ? "skill" : "skills"}`,
   });
 
+  if (interactive && process.stdout.isTTY) process.stdout.write(`\x1b]0;brito · ${path.basename(o.root)}\x07`);
   const dock = interactive ? new Dock({ status, commands: menu, historyFile: path.join(globalHome(), "history") }) : null;
   if (dock) { await dock.start(); ui.attachDock(dock); }
   const rl = dock ? null : readline.createInterface({ input: process.stdin, terminal: false });
@@ -115,7 +117,7 @@ export async function runRepl(b: ReplBackend, o: ReplOpts) {
   const common: Record<string, (args: string[]) => Promise<void> | void> = {
     "/help": () => {
       for (const m of menu) ui.print(`  ${c.soft(m.name.padEnd(12))} ${c.muted(m.desc)}`);
-      ui.print(`  ${c.soft("Shift+Tab".padEnd(12))} ${c.muted("alterna modo: manual → auto-edições → plano")}`);
+      ui.print(`  ${c.soft("Shift+Tab".padEnd(12))} ${c.muted("alterna modo: manual → auto-edições → plano → tudo liberado")}`);
       ui.print(`  ${c.soft("!comando".padEnd(12))} ${c.muted("roda no shell, sem chamar o modelo")}`);
       ui.print(c.dim("  Enter envia · Alt+Enter nova linha · ↑↓ histórico · Tab completa · Ctrl+C interrompe"));
     },
@@ -126,9 +128,9 @@ export async function runRepl(b: ReplBackend, o: ReplOpts) {
     },
     "/indicadores": () => { for (const l of ui.statusLegend()) ui.print(l); },
     "/modo": ([m]) => {
-      const pick: Record<string, PermMode> = { manual: "manual", auto: "auto", plano: "plan", plan: "plan" };
+      const pick: Record<string, PermMode> = { manual: "manual", auto: "auto", plano: "plan", plan: "plan", tudo: "bypass", bypass: "bypass" };
       if (m && pick[m]) { perms.mode = pick[m]; dock?.repaint(); }
-      else if (m) { ui.warn("use: /modo manual | auto | plano"); return; }
+      else if (m) { ui.warn("use: /modo manual | auto | plano | tudo"); return; }
       const i = MODE_LABEL[perms.mode];
       ui.print(`  ${c.soft(`${i.icon} ${i.name}`)} ${c.muted(i.hint)}`);
     },

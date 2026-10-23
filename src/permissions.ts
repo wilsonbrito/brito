@@ -1,4 +1,4 @@
-// Modos de permissão, no estilo do Claude Code: Shift+Tab alterna manual → auto → plano.
+// Modos de permissão, no estilo do Claude Code: Shift+Tab alterna manual → auto → plano → tudo liberado.
 export type PermMode = "manual" | "auto" | "plan" | "bypass";
 
 /** Estado global da sessão (um REPL por processo). */
@@ -12,9 +12,9 @@ export const MODE_ENV = "BRITO_PERMS_MODE";
 export const modeFromEnv = (v: string | undefined): PermMode | undefined =>
   (["manual", "auto", "plan", "bypass"] as const).find((m) => m === v);
 
-const CYCLE: PermMode[] = ["manual", "auto", "plan"];
+export const CYCLE: PermMode[] = ["manual", "auto", "plan", "bypass"];
 
-/** Próximo modo do ciclo; `bypass` (de --yes ou "tudo") volta para manual. */
+/** Próximo modo do ciclo; depois de `bypass` (tudo liberado) volta para manual. */
 export function cycleMode(): PermMode {
   perms.mode = CYCLE[(CYCLE.indexOf(perms.mode) + 1) % CYCLE.length];
   return perms.mode;

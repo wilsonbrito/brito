@@ -147,7 +147,7 @@ OK: 20 arquivos, 66 símbolos, 54 chamadas, 17 imports | +0 ~0 -0 =20 (28ms)
 |---|---|
 | `/help` | list commands |
 | `/model`, `/effort`, `/reasoning` | choose model, reasoning effort and thinking (session, global or once) |
-| `/modo` or `Shift+Tab` | switch permission mode: manual → auto-edits → plan |
+| `/modo` or `Shift+Tab` | switch permission mode: manual → auto-edits → plan → bypass ("everything allowed") |
 | `/skills` | list skills · `pending` · `approve <name>` · `reject <name>` · `consolidate` · `rm <name>` · `promote <name>` |
 | `/learn` | extract skills from the last turn now |
 | `/agents`, `/tools`, `/index`, `/context` | inspect subagents, tools, the index and the context window |

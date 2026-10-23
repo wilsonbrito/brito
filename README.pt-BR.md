@@ -143,7 +143,7 @@ OK: 20 arquivos, 66 símbolos, 54 chamadas, 17 imports | +0 ~0 -0 =20 (28ms)
 |---|---|
 | `/help` | lista os comandos |
 | `/model`, `/effort`, `/reasoning` | escolhem modelo, esforço de raciocínio e thinking (sessão, global ou uma vez) |
-| `/modo` ou `Shift+Tab` | troca o modo de permissão: manual → auto-edições → plano |
+| `/modo` ou `Shift+Tab` | troca o modo de permissão: manual → auto-edições → plano → tudo liberado |
 | `/skills` | lista skills · `pending` · `approve <nome>` · `reject <nome>` · `consolidate` · `rm <nome>` · `promote <nome>` |
 | `/learn` | extrai skills do último turno agora |
 | `/agents`, `/tools`, `/index`, `/context` | inspecionam subagentes, tools, o índice e a janela de contexto |

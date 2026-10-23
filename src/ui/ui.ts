@@ -340,7 +340,7 @@ class UI {
    * Barra de status: cada indicador tem um rótulo para quem não conhece os números.
    * Se não couber na largura do terminal, descarta primeiro os de menor prioridade (tempo, extra, tokens…).
    */
-  statusLine(s: { model: string; ctxTokens: number; ctxWindow: number; input: number; output: number; cacheRead?: number; startedAt: number; extra?: string; cost?: number; mode?: string }) {
+  statusLine(s: { model: string; ctxTokens: number; ctxWindow: number; input: number; output: number; cacheRead?: number; startedAt: number; extra?: string; cost?: number; mode?: string; project?: string }) {
     const pct = Math.min(100, Math.round((s.ctxTokens / s.ctxWindow) * 100));
     const slots = 8, filled = Math.round((pct / 100) * slots);
     const colour = pct >= 95 ? c.err : pct >= 80 ? c.rgb(palette.orange) : pct >= 50 ? c.warn : c.ok;
@@ -354,6 +354,7 @@ class UI {
 
     // [prioridade (maior = descarta primeiro), texto]
     const segs: [number, string][] = [
+      ...(s.project ? [[0, c.light("📁 ") + c.bold(c.soft(s.project))] as [number, string]] : []),
       ...(s.mode ? [[0, s.mode] as [number, string]] : []),
       [0, c.light("⬢ ") + c.bold(c.soft(s.model))],
       [0, label("contexto") + c.muted(`${fmtTokens(s.ctxTokens)}/${fmtTokens(s.ctxWindow)}`) + ` [${bar}] ${colour(`${pct}%`)}`],
@@ -382,6 +383,7 @@ class UI {
       ["tokens", "total da sessão: ↑ enviados ao modelo (inclui cache) · ↓ gerados por ele."],
       ["custo", "gasto estimado da sessão em dólares."],
       ["tempo", "há quanto tempo a sessão está aberta · (ativo) soma do tempo gasto em todos os turnos."],
+      ["📁", "projeto (pasta) em que o Brito está trabalhando — também aparece no título da janela do terminal."],
       ["skill", "skill carregada (skill_load) no turno em andamento."],
     ].map(([k, v]) => `  ${c.soft(k.padEnd(9))} ${c.muted(v)}`);
   }
