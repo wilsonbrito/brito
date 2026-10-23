@@ -26,6 +26,22 @@ function fixPath() {
   } catch { /* mantém o ambiente atual */ }
 }
 
+/**
+ * No Windows o addon pré-compilado do @ladybugdb/core não carrega dentro do electron.exe (ERR_DLOPEN_FAILED: falta o
+ * delay-load hook que redireciona node.exe → electron.exe). Lá o backend roda no Node do sistema (BRITO_NODE ou o
+ * `node` do PATH); sem Node instalado, cai no Node do Electron.
+ */
+function backendRuntime() {
+  if (process.env.BRITO_NODE) return { bin: process.env.BRITO_NODE, env: {} };
+  if (process.platform === "win32") {
+    try {
+      const node = execFileSync("where", ["node"], { encoding: "utf8", timeout: 4000 }).split(/\r?\n/).find((l) => l.trim());
+      if (node) return { bin: node.trim(), env: {} };
+    } catch { /* sem node no PATH */ }
+  }
+  return { bin: process.execPath, env: { ELECTRON_RUN_AS_NODE: "1" } };
+}
+
 const backends = new Map(); // sessionId → { child, ready: Promise }
 let win;
 
@@ -36,7 +52,8 @@ function startBackend(sessionId, root, claudeId) {
   if (cur) return cur.ready;
   if (!cliPath) return Promise.reject(new Error("dist/cli.bundle.mjs não encontrado: rode `npm run bundle` na raiz do projeto."));
   const args = [cliPath, "gui-serve", "-d", root, ...(claudeId ? ["--resume", claudeId] : [])];
-  const child = spawn(process.execPath, args, { cwd: root, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, stdio: ["pipe", "pipe", "pipe"] });
+  const rt = backendRuntime();
+  const child = spawn(rt.bin, args, { cwd: root, env: { ...process.env, ...rt.env }, stdio: ["pipe", "pipe", "pipe"] });
   let resolveReady, rejectReady, isReady = false;
   const ready = new Promise((res, rej) => { resolveReady = res; rejectReady = rej; });
   let buf = "", err = "";
@@ -57,7 +74,8 @@ function startBackend(sessionId, root, claudeId) {
   child.on("error", (e) => { rejectReady(e); send(sessionId, { t: "error", msg: `não consegui iniciar o backend: ${e.message}` }); });
   child.on("close", (code) => {
     backends.delete(sessionId);
-    if (!isReady) rejectReady(new Error(err.trim().slice(0, 500) || `backend saiu (${code})`));
+    // o fim do stderr tem a mensagem do erro; o começo, no Node do Electron, é só o fonte minificado do node_init
+    if (!isReady) rejectReady(new Error(err.trim().slice(-500) || `backend saiu (${code})`));
     send(sessionId, { t: "closed", code });
   });
   backends.set(sessionId, { child, ready });

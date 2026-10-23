@@ -16,6 +16,8 @@ export interface ToolContext {
   syncing?: Promise<void>;
   /** skills carregadas no turno atual (alimenta a reflexão pós-tarefa) */
   loadedSkills?: Set<string>;
+  /** modelo vivo do agente principal (subagentes ficam no mesmo provedor) */
+  model?: () => string;
 }
 
 export interface Tool<S extends z.ZodObject<any> = z.ZodObject<any>> {

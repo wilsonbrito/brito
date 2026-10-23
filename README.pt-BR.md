@@ -143,6 +143,7 @@ OK: 20 arquivos, 66 símbolos, 54 chamadas, 17 imports | +0 ~0 -0 =20 (28ms)
 |---|---|
 | `/help` | lista os comandos |
 | `/model`, `/effort`, `/reasoning` | escolhem modelo, esforço de raciocínio e thinking (sessão, global ou uma vez) |
+| `/fallback` | mostra o modelo principal e o fallback (qwen), e se a troca já aconteceu |
 | `/modo` ou `Shift+Tab` | troca o modo de permissão: manual → auto-edições → plano → tudo liberado |
 | `/skills` | lista skills · `pending` · `approve <nome>` · `reject <nome>` · `consolidate` · `rm <nome>` · `promote <nome>` |
 | `/learn` | extrai skills do último turno agora |
@@ -173,6 +174,54 @@ O Brito **não tem drivers de banco e não se conecta a nada sozinho**. Quando p
 - Credenciais nunca pertencem a skills ou notas: o lint as rejeita. Cite o **nome** da variável de ambiente.
 - Prefira papéis somente leitura e ambientes que não sejam de produção ao dar acesso a banco para um agente.
 - Uma skill proposta que contém comando destrutivo é destacada na revisão, para você decidir se precisa de uma guarda (backup, cópia, confirmação).
+
+## Endpoint compatível com OpenAI (ex.: Qwen no OCI)
+
+> Passo a passo completo (instalação, chave, perfil e como dar acesso ao repositório): [docs/GUIA-QWEN.md](docs/GUIA-QWEN.md).
+
+Além do Claude, o Brito roda com qualquer modelo servido pela API **Chat Completions** da OpenAI (vLLM, OCI Generative AI, LiteLLM, Ollama…) com chamada de ferramentas. Cadastre um perfil em `~/.brito/config.json`:
+
+```json
+{
+  "providers": {
+    "qwen": {
+      "type": "openai",
+      "label": "Qwen 27B (OCI)",
+      "baseURL": "https://inference.generativeai.<região>.oci.oraclecloud.com/openai/v1",
+      "model": "<id do modelo; no OCI, o OCID do endpoint dedicado>",
+      "apiKeyEnv": "BRITO_QWEN_API_KEY",
+      "contextWindow": 262144,
+      "vision": false,
+      "thinkingToggle": true
+    }
+  }
+}
+```
+
+A chave **não** fica no config: ponha na variável de ambiente indicada em `apiKeyEnv`. Depois:
+
+```bash
+brito --model qwen            # esta sessão
+/model qwen --global          # dentro do REPL: vira o padrão
+```
+
+Com um perfil escolhido, **tudo** vai para o endpoint: agente principal, subagentes (o `explore` deixa de usar o Haiku), resumo de contexto e aprendizado de skills; o Brito abre sem `ANTHROPIC_API_KEY` e sem o `claude` CLI. `/reasoning none` desliga o raciocínio do modelo (respostas bem mais rápidas no Qwen). `thinkingToggle: true` só para servidores que aceitam `chat_template_kwargs` (vLLM/Qwen); sem ele o `/reasoning none` não tem efeito, mas nenhum parâmetro estranho é enviado. Imagens só são enviadas com `"vision": true`. Exceção consciente: `BRITO_EXPLORE_MODEL` continua mandando no subagente `explore`; já um `BRITO_LEARN_MODEL` que aponte para um Claude é ignorado enquanto um perfil estiver ativo. Perfil com erro no config não cai no Claude: o Brito avisa e para. `/effort` continua exclusivo do modo `claude` CLI, e um perfil não roda dentro do `claude` CLI (o `/model` avisa para reabrir com `--model`).
+
+### Fallback para o Qwen
+
+Com o Claude como modelo principal (API ou `claude` CLI), o perfil `qwen` é o fallback automático — sempre ele, sem chave nova no config. Se o Claude falha por **limite da assinatura, rate limit, crédito, autenticação, sobrecarga ou rede**, o Brito avisa e refaz o pedido no Qwen com a conversa até ali (as tools que já rodaram ficam no histórico, para não serem repetidas). No modo `claude` CLI o motor inteiro troca para o loop próprio do Brito.
+
+- A troca acontece uma vez por sessão e não volta sozinha: `/model <claude>` volta ao Claude (e o fallback pode disparar de novo depois).
+- Não troca por Ctrl+C nem por erro de conteúdo (requisição inválida, `max_tokens`, tool quebrada).
+- Sem `ANTHROPIC_API_KEY` e sem o `claude` CLI, o Brito já abre no Qwen, com aviso. Sem o fallback pronto, o erro de sempre inclui o motivo (ex.: falta `BRITO_QWEN_API_KEY`). Perfil `qwen` inválido continua sendo erro, nunca fallback silencioso.
+- `/fallback` mostra o estado. No app de desktop, envie `/fallback` como mensagem; a barra de status mostra o Qwen quando o fallback está ativo.
+
+```
+/fallback
+  principal  claude-opus-5-5  (claude CLI · assinatura)
+  fallback   Qwen 27B (OCI)  qwen · ~/.brito/config.json  ✓ pronto
+  estado     inativo — troca automática se o Claude falhar por limite, crédito, auth ou sobrecarga
+```
 
 ## Configuração
 

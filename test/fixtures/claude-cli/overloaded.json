@@ -1,0 +1,36 @@
+{
+  "cliVersion": "2.1.306 (Claude Code)",
+  "captured": "synthetic",
+  "note": "sobrecarga persistente (error=overloaded)",
+  "code": 1,
+  "signal": null,
+  "stderr": "",
+  "events": [
+    {
+      "type": "assistant",
+      "parent_tool_use_id": null,
+      "message": {
+        "model": "<synthetic>",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "API Error: Repeated 529 Overloaded errors"
+          }
+        ]
+      },
+      "error": "overloaded",
+      "is_api_error_message": true,
+      "api_error_status": 529
+    },
+    {
+      "type": "result",
+      "subtype": "success",
+      "is_error": true,
+      "result": "API Error: Repeated 529 Overloaded errors",
+      "api_error_status": 529,
+      "terminal_reason": "api_error"
+    }
+  ],
+  "expected": "overloaded"
+}

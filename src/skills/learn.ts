@@ -1,4 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
+import type Anthropic from "@anthropic-ai/sdk";
+import { providerFor } from "../provider/index.js";
 import { z } from "zod";
 import { execTool, toApiTools, type ToolContext } from "../tools/registry.js";
 import type { TurnRecord } from "../agent/loop.js";
@@ -106,8 +107,9 @@ export function recordOutcomes(turn: TurnRecord | null, ctx: ToolContext): strin
 export type Complete = (req: { model: string; system: string; user: string; tools: Anthropic.Tool[]; maxTokens: number }) => Promise<Anthropic.ContentBlock[]>;
 
 export const defaultComplete: Complete = async ({ model, system, user, tools, maxTokens }) => {
-  const res = await new Anthropic().messages.create({ model, max_tokens: maxTokens, system, tools, messages: [{ role: "user", content: user }] });
-  return res.content;
+  // Raciocínio desligado: o julgamento cabe no orçamento e a resposta útil é a chamada de skill_save.
+  const res = await providerFor(model).send({ model, maxTokens, system, tools, messages: [{ role: "user", content: user }], thinking: false });
+  return res.content as unknown as Anthropic.ContentBlock[];
 };
 
 /**

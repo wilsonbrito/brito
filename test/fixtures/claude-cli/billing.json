@@ -1,0 +1,36 @@
+{
+  "cliVersion": "2.1.306 (Claude Code)",
+  "captured": "synthetic",
+  "note": "créditos da API acabaram (error=billing_error)",
+  "code": 1,
+  "signal": null,
+  "stderr": "",
+  "events": [
+    {
+      "type": "assistant",
+      "parent_tool_use_id": null,
+      "message": {
+        "model": "<synthetic>",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Credit balance is too low"
+          }
+        ]
+      },
+      "error": "billing_error",
+      "is_api_error_message": true,
+      "api_error_status": 400
+    },
+    {
+      "type": "result",
+      "subtype": "success",
+      "is_error": true,
+      "result": "Credit balance is too low",
+      "api_error_status": 400,
+      "terminal_reason": "api_error"
+    }
+  ],
+  "expected": "quota"
+}

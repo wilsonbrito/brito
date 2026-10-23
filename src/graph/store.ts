@@ -181,3 +181,16 @@ export class GraphStore {
     await this.release();
   }
 }
+
+/**
+ * Abre o grafo no processo do Brito depois de um turno do claude: o servidor MCP dele solta o lock ao morrer, mas pode
+ * levar um instante além do `close` do filho. Uma tentativa extra curta cobre isso.
+ */
+export async function openGraphAfterClaude(root: string): Promise<GraphStore> {
+  try { return await GraphStore.open(root); }
+  catch (e) {
+    if (!(e instanceof GraphLockedError)) throw e;
+    await sleep(500);
+    return GraphStore.open(root);
+  }
+}

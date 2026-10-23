@@ -1,0 +1,5 @@
+{
+  "status": 400,
+  "requestId": "/TESTE/1",
+  "body": "{ \"code\": \"400\", \"message\": \"{\\\"error\\\":{\\\"message\\\":\\\"max_completion_tokens=100000000 cannot be greater than max_model_len=max_total_tokens=262144. Please request fewer output tokens. (parameter=max_completion_tokens, value=100000000)\\\",\\\"type\\\":\\\"BadRequestError\\\",\\\"param\\\":\\\"max_completion_tokens\\\",\\\"code\\\":400}}\" }"
+}

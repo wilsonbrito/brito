@@ -3,6 +3,8 @@ import { defineTool, allTools, execTool } from "./registry.js";
 import { Agent } from "../agent/loop.js";
 import { getAgent, listAgents, type AgentDef } from "../agent/agents.js";
 import { buildSubagentPrompt } from "../agent/prompt.js";
+import { subagentModel } from "../engine.js";
+import { initialModel } from "../model.js";
 import { ui } from "../ui/ui.js";
 
 let seq = 0;
@@ -54,7 +56,7 @@ defineTool({
 
     log(`iniciado: ${task.slice(0, 100).replace(/\s+/g, " ")}`);
     const sub = new Agent(buildSubagentPrompt(ctx.root, def), ctx, {
-      model: def.model,
+      model: subagentModel(def, ctx.model?.() ?? initialModel(), process.env),
       maxSteps: 25,
       quiet: true,
       tools: toolSet(def),

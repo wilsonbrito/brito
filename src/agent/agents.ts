@@ -20,7 +20,7 @@ const BUILTIN: AgentDef[] = [
     name: "explore",
     description: "Somente leitura e rápido. Localiza código, mapeia fluxos e responde 'onde/como/quem chama' usando o grafo. Não edita nada.",
     tools: READ_TOOLS,
-    model: process.env.BRITO_EXPLORE_MODEL ?? "claude-haiku-4-5-20251001",
+    // Sem modelo fixo: subagentModel (engine.ts) escolhe Haiku no Claude, o modelo principal num endpoint, ou BRITO_EXPLORE_MODEL.
     prompt: "Você é um agente de exploração de código. Descubra o que foi pedido com o mínimo de leitura: comece pelo grafo (graph_search/graph_context/graph_callers/graph_callees), leia só os trechos apontados. Entregue achados com caminhos `arquivo:linha`, sem despejar código longo.",
     source: "builtin",
   },

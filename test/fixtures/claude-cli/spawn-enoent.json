@@ -1,0 +1,11 @@
+{
+  "cliVersion": "—",
+  "captured": "real",
+  "note": "spawn de um executável que não existe (node 'error' + 'close' com -4058 no Windows)",
+  "code": -4058,
+  "signal": null,
+  "stderr": "",
+  "spawnError": "spawn claude ENOENT",
+  "events": [],
+  "expected": "auth"
+}

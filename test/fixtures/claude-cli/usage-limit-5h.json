@@ -1,0 +1,36 @@
+{
+  "cliVersion": "2.1.306 (Claude Code)",
+  "captured": "synthetic",
+  "note": "frase conhecida (spec §2); no 2.1.306 o limite chega como error=rate_limit, status 429",
+  "code": 1,
+  "signal": null,
+  "stderr": "",
+  "events": [
+    {
+      "type": "assistant",
+      "parent_tool_use_id": null,
+      "message": {
+        "model": "<synthetic>",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "5-hour limit reached ∙ resets 3pm"
+          }
+        ]
+      },
+      "error": "rate_limit",
+      "is_api_error_message": true,
+      "api_error_status": 429
+    },
+    {
+      "type": "result",
+      "subtype": "success",
+      "is_error": true,
+      "result": "5-hour limit reached ∙ resets 3pm",
+      "api_error_status": 429,
+      "terminal_reason": "api_error"
+    }
+  ],
+  "expected": "quota"
+}

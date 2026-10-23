@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Automatic fallback to Qwen.** When Claude (API or `claude` CLI) fails on account/capacity (subscription limit, rate limit, credit, auth, overload, network), Brito warns and redoes the request on the `qwen` profile with the conversation so far. Once per session; `/model <claude>` goes back. Never on Ctrl+C or content errors.
+- Without `ANTHROPIC_API_KEY` and without the `claude` CLI, Brito (terminal and desktop) opens on Qwen when the fallback is ready; otherwise the startup error says why the fallback is unavailable.
+- `/fallback` shows the main model, the fallback and its state (terminal; in the desktop app, send it as a message). The desktop status bar shows Qwen while the fallback is active.
+- Going back from Qwen to the `claude` CLI (`/model <claude>`, terminal and desktop) keeps the context: what was done in API mode opens the next request to Claude, and a later fallback inherits it too.
+- In API mode, `/model <claude>` without `ANTHROPIC_API_KEY` is refused with a hint instead of failing on the next turn.
+
+## 0.7.0-qwen.0 — 2026-10-20 (fork)
+
+### Added
+- **OpenAI-compatible endpoints.** Profiles in `~/.brito/config.json` (`providers`) let Brito run on any model behind the Chat Completions API with tool calling — first target: Qwen 27B on an OCI Generative AI dedicated endpoint. Choose it with `brito --model <profile>`, `BRITO_MODEL` or `/model`.
+- With a profile selected, every model call (main agent, subagents, context compaction, skill learning) goes to that endpoint; Brito no longer needs `ANTHROPIC_API_KEY` or the `claude` CLI in that case.
+- `-m, --model` option on the main command; `/reasoning none|<level>` in API mode (turns the endpoint model's reasoning off/on).
+- `scripts/capture-openai-fixtures.ts` records sanitized real responses for the provider tests.
+
+### Changed
+- Model calls go through a provider layer (`src/provider/`); Claude behaviour is unchanged.
+- Learning, consolidation and the `plan`/`general` subagents follow the live model (`/model`) instead of the model read at startup.
+- A response cut by the token limit now warns and keeps the history valid (no empty assistant message; a cut tool call gets an error `tool_result`). Endpoint profiles with reasoning on get a 16k output budget.
+
+### Fixed
+- `-m/--model` now applies to single-prompt runs in `claude` CLI mode too.
+
 ## 0.6.1 — 2026-10-19
 
 Fixes concurrent use of the same project on **Windows and Linux** in 0.6.0. If you use several Brito sessions on one project on those systems, upgrade.

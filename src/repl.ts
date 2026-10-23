@@ -35,6 +35,54 @@ export interface ReplBackend {
   close(): Promise<void>;
 }
 
+export type SwitchableBackend = ReplBackend & { swap(next: ReplBackend): void; current(): ReplBackend };
+
+/**
+ * Backend com o motor substituível no meio da sessão (claude CLI → qwen): o REPL monta o menu uma vez, então os
+ * comandos ficam estáveis e o que o motor atual não tem responde "indisponível". `usage`/`cost` somam todos os
+ * motores já usados (cada um uma vez, mesmo que volte a ser o atual).
+ */
+export function switchableBackend(initial: ReplBackend): SwitchableBackend {
+  let cur = initial;
+  const seen = new Set<ReplBackend>([initial]);
+  const commands: ReplBackend["commands"] = {};
+  const delegate = (name: string, desc: string) => {
+    commands[name] = {
+      desc,
+      run: async (args) => {
+        const cmd = cur.commands[name];
+        if (cmd) await cmd.run(args);
+        else ui.warn(`${name} não está disponível no ${cur.model()}`);
+      },
+    };
+  };
+  const adopt = (b: ReplBackend) => { for (const [name, v] of Object.entries(b.commands)) if (!commands[name]) delegate(name, v.desc); };
+  adopt(initial);
+  return {
+    model: () => cur.model(),
+    contextTokens: () => cur.contextTokens(),
+    usage: () => {
+      const all = [...seen].map((b) => b.usage());
+      return { input: all.reduce((s, u) => s + u.input, 0), output: all.reduce((s, u) => s + u.output, 0), cacheRead: all.reduce((s, u) => s + (u.cacheRead ?? 0), 0) };
+    },
+    get ctxWindow() { return cur.ctxWindow; },
+    cost: () => {
+      const all = [...seen].map((b) => b.cost?.()).filter((x): x is number => x !== undefined);
+      return all.length ? all.reduce((s, x) => s + x, 0) : undefined;
+    },
+    turn: (text, signal) => cur.turn(text, signal),
+    abort: () => cur.abort?.(),
+    // Todos os motores: o claude CLI fora de uso guarda a sessão (--resume) e os turnos que o fallback herdaria.
+    reset: () => { for (const b of seen) b.reset(); },
+    afterTurn: async () => { await cur.afterTurn?.(); },
+    onShell: () => cur.onShell?.(),
+    commands,
+    close: async () => { await cur.close(); },
+    swap: (next) => { cur = next; seen.add(next); adopt(next); },
+    current: () => cur,
+  };
+}
+
 export interface ReplOpts {
   root: string;
   yes: boolean;

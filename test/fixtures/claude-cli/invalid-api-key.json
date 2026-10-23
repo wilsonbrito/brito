@@ -1,0 +1,40 @@
+{
+  "cliVersion": "2.1.306 (Claude Code)",
+  "captured": "real",
+  "note": "CLAUDE_CONFIG_DIR vazio + ANTHROPIC_API_KEY inválida",
+  "code": 1,
+  "signal": null,
+  "stderr": "",
+  "events": [
+    {
+      "type": "assistant",
+      "parent_tool_use_id": null,
+      "message": {
+        "model": "<synthetic>",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Invalid API key · Fix external API key"
+          }
+        ]
+      },
+      "error": "authentication_failed",
+      "is_api_error_message": true,
+      "api_error_status": 401,
+      "api_error_origin": "first_party"
+    },
+    {
+      "total_cost_usd": 0,
+      "terminal_reason": "api_error",
+      "is_error": true,
+      "num_turns": 1,
+      "subtype": "success",
+      "api_error_status": 401,
+      "api_error_origin": "first_party",
+      "result": "Invalid API key · Fix external API key",
+      "type": "result"
+    }
+  ],
+  "expected": "auth"
+}

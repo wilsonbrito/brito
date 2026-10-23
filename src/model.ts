@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import type { OpenAIProfile } from "./provider/types.js";
 
 /** Atalhos para os modelos atuais (o Hermes resolve aliases antes de validar o nome). */
 export const MODEL_ALIASES: Record<string, string> = {
@@ -139,6 +140,39 @@ export function parseModelArgs(raw: string): ModelRequest {
   return { model: model ? resolveModelAlias(model) : "", scope, errors };
 }
 
-/** Texto de ajuda mostrado por `/model` sem argumentos. */
-export const MODEL_HELP =
-  "uso: /model <nome|alias> [--global|--session|--once]  (aliases: " + Object.keys(MODEL_ALIASES).join(", ") + ")";
+/** Texto de ajuda mostrado por `/model` sem argumentos (perfis de endpoint entram junto dos aliases). */
+export function modelHelp(): string {
+  const profiles = Object.keys(loadProfiles().profiles);
+  return "uso: /model <nome|alias> [--global|--session|--once]  (aliases: " + Object.keys(MODEL_ALIASES).join(", ") + ")" +
+    (profiles.length ? `  (endpoints: ${profiles.join(", ")})` : "");
+}
+
+const isText = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
+
+/**
+ * Perfis de endpoint compatível com OpenAI (`providers` no config). Relido a cada chamada: é barato e o config muda
+ * durante a sessão. Perfil inválido não derruba o Brito: fica de fora e o motivo vai em `errors`.
+ */
+export function loadProfiles(): { profiles: Record<string, OpenAIProfile>; errors: string[]; rejected: string[] } {
+  let raw: unknown;
+  try { raw = JSON.parse(readFileSync(configPath(), "utf8"))?.providers; } catch { return { profiles: {}, errors: [], rejected: [] }; }
+  const profiles: Record<string, OpenAIProfile> = {};
+  const errors: string[] = [];
+  /** nomes de perfis inválidos: escolher um deles é erro, nunca cair no Claude */
+  const rejected: string[] = [];
+  if (!raw || typeof raw !== "object") return { profiles, errors, rejected };
+  for (const [key, v] of Object.entries(raw as Record<string, any>)) {
+    const name = key.trim().toLowerCase();
+    const missing = (["baseURL", "model", "apiKeyEnv"] as const).filter((f) => !isText(v?.[f]));
+    if (v?.type !== "openai") { errors.push(`perfil "${key}" ignorado: type precisa ser "openai"`); rejected.push(name); continue; }
+    if (missing.length) { errors.push(`perfil "${key}" ignorado: faltam ${missing.join(", ")}`); rejected.push(name); continue; }
+    profiles[name] = {
+      name, type: "openai", label: isText(v.label) ? v.label.trim() : name,
+      baseURL: v.baseURL.trim(), model: v.model.trim(), apiKeyEnv: v.apiKeyEnv.trim(),
+      contextWindow: Number(v.contextWindow) > 0 ? Number(v.contextWindow) : 128_000,
+      vision: v.vision === true,
+      thinkingToggle: v.thinkingToggle === true,
+    };
+  }
+  return { profiles, errors, rejected };
+}

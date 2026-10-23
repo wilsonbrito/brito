@@ -1,0 +1,36 @@
+{
+  "cliVersion": "2.1.306 (Claude Code)",
+  "captured": "synthetic",
+  "note": "429 sem ser o limite da assinatura (texto do bundle 2.1.306)",
+  "code": 1,
+  "signal": null,
+  "stderr": "",
+  "events": [
+    {
+      "type": "assistant",
+      "parent_tool_use_id": null,
+      "message": {
+        "model": "<synthetic>",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "API Error: Request rejected (429) · this may be a temporary capacity issue."
+          }
+        ]
+      },
+      "error": "rate_limit",
+      "is_api_error_message": true,
+      "api_error_status": 429
+    },
+    {
+      "type": "result",
+      "subtype": "success",
+      "is_error": true,
+      "result": "API Error: Request rejected (429) · this may be a temporary capacity issue.",
+      "api_error_status": 429,
+      "terminal_reason": "api_error"
+    }
+  ],
+  "expected": "rate_limit"
+}

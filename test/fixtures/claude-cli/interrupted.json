@@ -1,0 +1,10 @@
+{
+  "cliVersion": "2.1.306 (Claude Code)",
+  "captured": "real",
+  "note": "child.kill('SIGINT') 6s depois de subir (Windows): sem evento result. A sessão marca `aborted` e nunca classifica.",
+  "code": null,
+  "signal": "SIGINT",
+  "stderr": "",
+  "events": [],
+  "expected": null
+}
