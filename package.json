@@ -20,14 +20,14 @@
     "desktop:dmg": "npm run build && npm run bundle && npm --prefix desktop install --no-audit --no-fund && node desktop/package.mjs --dmg"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.131.0",
+    "@anthropic-ai/sdk": "^0.137.0",
     "@ladybugdb/core": "0.21.2",
     "@modelcontextprotocol/sdk": "^1.32.0",
     "commander": "^14.0.3",
     "string-width": "^8.3.0",
     "tinyglobby": "^0.2.17",
     "tree-sitter-wasms": "^0.1.13",
-    "web-tree-sitter": "0.24.7",
+    "web-tree-sitter": "0.27.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {
