@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.2 — 2026-10-24
+
+Maintenance and security release. No behavior change for normal use.
+
+### Fixed
+- The skills `.gitignore` is created atomically (no check-then-write race when two sessions start together).
+- Import aliases: a captured path containing `$&` or similar no longer gets rewritten by `String.replace`.
+- `.svelte`/`.vue`/`.astro`: the `</script>` closing tag is matched even with attributes or spaces, as browsers accept.
+- Removed unused imports and variables.
+
+### Changed
+- Dependencies: `@anthropic-ai/sdk` 0.137, `@modelcontextprotocol/sdk` and `@types/node` patches. `npm audit` is clean.
+- `commander` stays on 14 (15 requires Node >= 22.12; Brito supports Node >= 20).
+- Repository: community standards (CONTRIBUTING, Code of Conduct, SECURITY), Dependabot, CodeQL code scanning and branch protection on `main`. The desktop app builds on Electron 45.
+
 ## 0.7.1 — 2026-10-24
 
 Same app as 0.7.0; this release ships the **Windows desktop installer** that 0.7.0 missed.
