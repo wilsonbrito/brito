@@ -31,6 +31,10 @@ O CI roda os testes em macOS, Linux e Windows. Rode `typecheck` e `test` localme
 
 Confira `git config user.name` e `git config user.email` antes de commitar. O GitHub atribui a contribuição ao autor gravado em cada commit; um e-mail errado (por exemplo o do trabalho) faz o crédito ir para a identidade errada, e isso não se corrige sem reescrever o histórico.
 
+## Changelog
+
+Mudança visível ao usuário entra no `CHANGELOG.md`: o texto da release no GitHub é gerado dele (veja [RELEASING.md](RELEASING.md)).
+
 ## Licença das contribuições
 
 O projeto usa [PolyForm Noncommercial 1.0.0](LICENSE). Ao enviar um PR, você concorda que sua contribuição é licenciada sob os mesmos termos.

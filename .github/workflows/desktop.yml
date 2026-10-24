@@ -83,10 +83,17 @@ jobs:
             desktop/dist-app/*.tar.gz
             desktop/dist-app/*.exe
 
+      # O texto da release é a seção da versão no CHANGELOG.md; sem ela o job falha (escreva antes da tag).
+      - name: Notas da versão
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: node scripts/release-notes.mjs "${GITHUB_REF_NAME}" > "$RUNNER_TEMP/release-notes.md"
+
       - name: Publicar na Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
+          body_path: ${{ runner.temp }}/release-notes.md
           files: |
             desktop/dist-app/*.dmg
             desktop/dist-app/*.tar.gz
