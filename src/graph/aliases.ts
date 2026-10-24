@@ -168,7 +168,7 @@ export function aliasCandidates(set: AliasSet, spec: string): string[] {
     .sort((a, b) => b.prefix.length - a.prefix.length);
   for (const r of matches) {
     const captured = r.wildcard ? spec.slice(r.prefix.length, spec.length - r.suffix.length) : "";
-    for (const t of r.targets) out.push(clean(t.replace("*", captured)));
+    for (const t of r.targets) out.push(clean(t.replace("*", () => captured)));
   }
   if (set.baseUrl !== null && !spec.startsWith(".")) out.push(clean(px.join(set.baseUrl, spec)));
   return out.filter(inside);

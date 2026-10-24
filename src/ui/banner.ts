@@ -48,7 +48,6 @@ function listLine(label: string, items: string[], width: number): string {
 
 /** Linhas livres embaixo da janela: moldura (2) + dock com status e prompt. */
 const BELOW_BANNER = 7;
-const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 
 /** BRITO_BANNER=compact força o banner pequeno; =full força a tela cheia; sem nada, é tela cheia em janela grande. */
 function wantsFull(): boolean {

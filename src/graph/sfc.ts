@@ -20,7 +20,7 @@ const JS_TYPES = /^(module|(text|application)\/(javascript|typescript|ecmascript
 export function splitSfc(src: string, ext: string): SfcParts {
   const ranges: [number, number][] = [];
   let tsx = false;
-  for (const m of src.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
+  for (const m of src.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script[^>]*>/gi)) {
     const attrs = m[1] ?? "";
     const type = /\btype\s*=\s*["']?([^"'\s>]+)/i.exec(attrs)?.[1]?.toLowerCase();
     if (type && !JS_TYPES.test(type)) continue;

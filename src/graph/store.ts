@@ -98,7 +98,7 @@ export class GraphStore {
 
   /** Para tarefas longas (indexação): se outro processo está esperando o banco, solta e dá a vez a ele. Barato quando ninguém espera. */
   async yieldIfWaited() {
-    let age = Infinity;
+    let age: number;
     try { age = Date.now() - fs.statSync(this.waitingFile).mtimeMs; } catch { return; }
     if (age > 2000) return;
     await this.queue.catch(() => undefined);

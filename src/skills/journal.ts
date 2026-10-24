@@ -28,7 +28,7 @@ export function entryFromTurn(turn: TurnRecord, saved: string[], date = new Date
 /** Os arquivos locais do Brito não devem ir para o git por acidente. */
 function ensureIgnore(root: string) {
   const f = path.join(dirOf(root), ".gitignore");
-  if (!fs.existsSync(f)) fs.writeFileSync(f, ".journal.jsonl\n.pending/\n.trash/\n");
+  try { fs.writeFileSync(f, ".journal.jsonl\n.pending/\n.trash/\n", { flag: "wx" }); } catch (e) { if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e; }
 }
 
 export function readJournal(root: string): JournalEntry[] {

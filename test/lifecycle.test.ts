@@ -9,7 +9,6 @@ import { buildReflectInput } from "../src/skills/learn.js";
 import type { Complete } from "../src/skills/learn.js";
 import { GOOD_BODY, sandbox } from "./helpers.js";
 
-const DAY = 86_400_000;
 const mk = (name: string, over: Record<string, unknown> = {}) => ({ name, description: `Como fazer ${name} no projeto`, body: GOOD_BODY, ...over });
 
 /** Reescreve o frontmatter para simular uma skill antiga. */
