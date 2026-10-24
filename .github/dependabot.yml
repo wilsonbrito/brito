@@ -5,6 +5,9 @@ updates:
     schedule: { interval: weekly }
     open-pull-requests-limit: 5
     ignore:
+      # 15+ exige Node >= 22.12; o projeto declara engines >=20
+      - dependency-name: commander
+        update-types: ["version-update:semver-major"]
       # 0.25+ muda a API (Parser/SyntaxNode) e exige gramáticos compatíveis; migrar à parte
       - dependency-name: web-tree-sitter
         update-types: ["version-update:semver-minor", "version-update:semver-major"]
