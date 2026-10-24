@@ -22,6 +22,9 @@ const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: "inherit",
 const has = (flag) => process.argv.includes(flag);
 
 if (!["darwin", "linux", "win32"].includes(plat)) throw new Error(`SO sem suporte: ${plat}`);
+// Electron recente não baixa o binário no postinstall: baixa aqui se faltar.
+const electronInstall = path.join(here, "node_modules", "electron", "install.js");
+if (!fs.existsSync(electronDist) && fs.existsSync(electronInstall)) sh(process.execPath, [electronInstall]);
 for (const [p, hint] of [[electronDist, "npm --prefix desktop install"], [bundle, "npm run bundle"], [iconPng, "node desktop/package.mjs (ícone: desktop/make-icon.mjs)"]]) {
   if (!fs.existsSync(p)) throw new Error(`falta ${p}: ${hint}`);
 }
