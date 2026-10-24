@@ -6,7 +6,8 @@ import { OpenAICompatProvider, missingKeyMessage } from "../src/provider/openai-
 import type { ModelRequest, OpenAIProfile } from "../src/provider/types.js";
 
 const FIX = path.join(import.meta.dirname, "fixtures", "openai-compat");
-const fixture = (f: string) => fs.readFileSync(path.join(FIX, f), "utf8");
+// CRLF → LF: os testes cortam o SSE por "\n\n", e um checkout no Windows pode trazer CRLF.
+const fixture = (f: string) => fs.readFileSync(path.join(FIX, f), "utf8").replace(/\r\n/g, "\n");
 const PERFIL: OpenAIProfile = { name: "qwen", type: "openai", label: "Qwen", baseURL: "https://endpoint.invalido/openai/v1/", model: "endpoint-ocid-de-teste", apiKeyEnv: "BRITO_TESTE_KEY", contextWindow: 262144, vision: false, thinkingToggle: false };
 const ENV = { BRITO_TESTE_KEY: "chave-de-teste" };
 const REQ: ModelRequest = { model: "qwen", system: "S", messages: [{ role: "user", content: "oi" }], maxTokens: 400 };

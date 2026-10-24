@@ -1,0 +1,3 @@
+# Fixtures de teste são cortados por "\n\n": no Windows o checkout não pode virar CRLF.
+*.sse text eol=lf
+test/fixtures/** text eol=lf

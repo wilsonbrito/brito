@@ -59,7 +59,8 @@ test("estimateTokens: uma imagem grande em base64 não dispara compactação", (
   assert.ok(estimateTokens(msgs) < 5000);
 });
 
-test("PDF: reconhece caminho com espaço escapado e gera bloco document", () => {
+// `\ ` só escapa espaço fora do Windows (lá `\` separa pastas e os caminhos vêm entre aspas).
+test("PDF: reconhece caminho com espaço escapado e gera bloco document", { skip: process.platform === "win32" }, () => {
   const pdf = path.join(dir, "capitulo 6.pdf");
   fs.writeFileSync(pdf, "%PDF-1.4");
   const found = findImages(`${path.join(dir, "capitulo 6.pdf").replace(/ /g, "\\ ")}`);
