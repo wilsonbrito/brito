@@ -22,7 +22,7 @@ jobs:
       APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
       WIN_CERT_PFX: ${{ secrets.WIN_CERT_PFX }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with: { node-version: 22 }
       - run: npm ci
