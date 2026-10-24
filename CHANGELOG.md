@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.1 — 2026-10-24
+
+Same app as 0.7.0; this release ships the **Windows desktop installer** that 0.7.0 missed.
+
+### Fixed
+- Test suite passes on Windows again (LF test fixtures via `.gitattributes`; the escaped-space path test is POSIX-only), so the Windows desktop build is no longer blocked.
+
 ## 0.7.0 — 2026-10-23
 
 ### Added
