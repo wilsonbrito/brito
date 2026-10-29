@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.3 — 2026-10-29
+
+Fixes the terminal interface breaking when the window is resized.
+
+### Fixed
+- Resizing the terminal no longer leaves stray rules, a duplicated status bar or a misplaced input box. The dock now recomposes itself after the terminal reflows its content.
+
 ## 0.7.2 — 2026-10-24
 
 Maintenance and security release. No behavior change for normal use.
