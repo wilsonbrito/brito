@@ -45,6 +45,8 @@ export class Dock {
   private skipNL = false;
   private top = 1;
   private height = 0;
+  private lastWidths: number[] = [];
+  private lastCursor = { line: 0, col: 1 };
 
   private spinner: string | null = null;
   private busy = false;
@@ -66,12 +68,35 @@ export class Dock {
   private dsr?: (row: number, col: number) => void;
   private started = false;
   private onData = (d: string) => this.feed(d);
+  private resizeTimer?: NodeJS.Timeout;
   private onResize = () => {
     this.rows = process.stdout.rows || 24;
     this.cols = process.stdout.columns || 80;
     this.outRow = Math.min(this.outRow, this.rows);
-    process.stdout.write(this.paintSeq(false));
+    clearTimeout(this.resizeTimer);
+    this.resizeTimer = setTimeout(() => void this.reflow(), 40);
   };
+
+  /**
+   * O terminal re-quebra (reflow) o que já está na tela ao redimensionar: réguas largas viram 2 linhas
+   * e as posições guardadas ficam inválidas. Perguntamos onde o cursor foi parar, deduzimos onde o dock
+   * começa agora, apagamos dali para baixo e repintamos.
+   */
+  private async reflow() {
+    if (!this.started) return;
+    const [r] = await this.getCursor();
+    if (!this.started) return;
+    const wrap = (w: number) => Math.max(1, Math.ceil(w / this.cols));
+    const above = this.lastWidths.slice(0, this.lastCursor.line).reduce((n, w) => n + wrap(w), 0)
+      + Math.floor(Math.max(0, this.lastCursor.col - 1) / this.cols);
+    const top = Math.max(1, Math.min(this.rows, r - above));
+    this.outRow = top;
+    this.outCol = 1;
+    this.skipNL = false;
+    this.top = top;
+    this.height = 0;
+    process.stdout.write(`\x1b[${top};1H\x1b[J` + this.paintSeq(true));
+  }
 
   constructor(private opts: DockOpts) {
     if (opts.historyFile) {
@@ -108,6 +133,7 @@ export class Dock {
     this.restoreTerminal();
     process.stdin.off("data", this.onData);
     process.stdout.off("resize", this.onResize);
+    clearTimeout(this.resizeTimer);
     process.stdin.pause();
   }
 
@@ -294,6 +320,8 @@ export class Dock {
     }
     this.top = base;
     this.height = h;
+    this.lastWidths = visibleLines.map((l) => Math.min(stringWidth(stripAnsi(l)), this.cols));
+    this.lastCursor = { line: Math.max(0, Math.min(h - 1, cursor.row - (out.length - h) - 1)), col: Math.min(cursor.col, this.cols) };
     const row = base + cursor.row - (out.length - h);
     s += `\x1b[${Math.min(row, this.rows)};${Math.min(cursor.col, this.cols)}H`;
     return s;
