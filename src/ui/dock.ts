@@ -69,6 +69,8 @@ export class Dock {
   private started = false;
   private onData = (d: string) => this.feed(d);
   private resizeTimer?: NodeJS.Timeout;
+  private reflowing = false;
+  private reflowAgain = false;
   private onResize = () => {
     this.rows = process.stdout.rows || 24;
     this.cols = process.stdout.columns || 80;
@@ -84,8 +86,23 @@ export class Dock {
    */
   private async reflow() {
     if (!this.started) return;
-    const [r] = await this.getCursor();
+    if (this.reflowing) { this.reflowAgain = true; return; } // um DSR por vez; refaz ao terminar
+    this.reflowing = true;
+    try {
+      do {
+        this.reflowAgain = false;
+        await this.reflowOnce();
+      } while (this.reflowAgain && this.started);
+    } finally {
+      this.reflowing = false;
+    }
+  }
+
+  private async reflowOnce() {
+    const pos = await this.getCursor(true);
     if (!this.started) return;
+    if (!pos) { process.stdout.write(this.paintSeq(false)); return; } // sem resposta do terminal: não chuta posição
+    const [r] = pos;
     const wrap = (w: number) => Math.max(1, Math.ceil(w / this.cols));
     const above = this.lastWidths.slice(0, this.lastCursor.line).reduce((n, w) => n + wrap(w), 0)
       + Math.floor(Math.max(0, this.lastCursor.col - 1) / this.cols);
@@ -141,9 +158,11 @@ export class Dock {
     try { process.stdout.write("\x1b[?2004l\x1b[?25h"); process.stdin.setRawMode?.(false); } catch { /* já fechado */ }
   }
 
-  private getCursor(): Promise<[number, number]> {
+  private getCursor(): Promise<[number, number]>;
+  private getCursor(strict: true): Promise<[number, number] | null>;
+  private getCursor(strict = false): Promise<[number, number] | null> {
     return new Promise((resolve) => {
-      const t = setTimeout(() => { this.dsr = undefined; resolve([this.rows, 1]); }, 400);
+      const t = setTimeout(() => { this.dsr = undefined; resolve(strict ? null : [this.rows, 1]); }, 400);
       this.dsr = (r, col) => { clearTimeout(t); this.dsr = undefined; resolve([r, col]); };
       process.stdout.write("\x1b[6n");
     });
