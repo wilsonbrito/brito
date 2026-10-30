@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { defineTool } from "./registry.js";
-import { bumpUses, deleteSkill, getSkill, listPending, savePending, saveSkill, validate } from "../skills/store.js";
+import { bumpUses, deleteSkill, getSkill, listPending, saveSkill, validate } from "../skills/store.js";
+import { saveAuto } from "../skills/trial.js";
 import { describeSave } from "../skills/describe.js";
 import { perms } from "../permissions.js";
 
@@ -20,7 +21,7 @@ defineTool({
 defineTool({
   name: "skill_save",
   description:
-    "Cria ou atualiza uma skill: procedimento reutilizável aprendido numa tarefa. Só para padrões GERAIS e repetíveis (como fazer X neste projeto, armadilhas, como verificar) — nunca fatos de uma tarefa única, segredos ou caminhos absolutos. Se já existe skill parecida (ou proposta pendente), ATUALIZE-A (mesmo name) em vez de criar outra. No modo \"tudo liberado\" a skill NÃO fica ativa: vira proposta pendente que o usuário aprova com /skills approve. body em markdown: ## Quando usar, ## Passos, ## Armadilhas, ## Verificação.",
+    "Cria ou atualiza uma skill: procedimento reutilizável aprendido numa tarefa. Só para padrões GERAIS e repetíveis (como fazer X neste projeto, armadilhas, como verificar) — nunca fatos de uma tarefa única, segredos ou caminhos absolutos. Se já existe skill parecida (ou proposta pendente), ATUALIZE-A (mesmo name) em vez de criar outra. No modo \"tudo liberado\" a skill entra em teste (se for segura) ou vira proposta pendente (comando destrutivo, ou mudança numa skill aprovada pelo usuário). body em markdown: ## Quando usar, ## Passos, ## Armadilhas, ## Verificação.",
   schema: z.object({
     name: z.string().describe("kebab-case"),
     description: z.string().describe("uma frase: QUANDO usar (10–200 chars)"),
@@ -33,12 +34,8 @@ defineTool({
   describe: (i, ctx) => describeSave(ctx.root, i),
   async run({ name, description, body, refs, scope, reason }, ctx) {
     validate({ name, description, body });
-    // Em bypass nada pede aprovação, então uma skill gravada aqui viraria instrução ativa sem nenhum humano ter visto.
-    // Mesma política do reflect(): vai para a fila de revisão. Vale para o backend de API e para o servidor MCP.
-    if (perms.mode === "bypass") {
-      const target = savePending(ctx.root, { name, description, body, refs, reason }, scope);
-      return `Skill ${name} proposta (${target}) e aguardando revisão: /skills approve ${name} (modo "tudo liberado": nenhuma skill fica ativa sem revisão).`;
-    }
+    // Em bypass nada pede aprovação: usa a mesma política segura da reflexão autônoma (em teste; o arriscado vai para a fila de revisão).
+    if (perms.mode === "bypass") return saveAuto(ctx.root, { name, description, body, refs, reason }).msg;
     const r = saveSkill(ctx.root, { name, description, body, refs }, scope);
     return r.created ? `Skill ${name} criada (${r.scope}, v1).` : `Skill ${name} atualizada (${r.scope}, v${r.version}); a anterior ficou em history/.`;
   },

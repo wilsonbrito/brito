@@ -99,14 +99,14 @@ test("redact também esconde credencial em URL e mantém a redação de segredos
 
 const skillSave = (sb: ReturnType<typeof sandbox>, extra = "") => execTool("skill_save", input(extra), sb.ctx);
 
-test("skill_save em bypass vira proposta pendente, não skill ativa", async () => {
+test("skill_save em bypass grava skill nova em teste, sem fila de revisão", async () => {
   const sb = sandbox();
   try {
     const r = await withMode("bypass", () => skillSave(sb));
     assert.equal(r.isError, false);
-    assert.match(r.text, /aguardando revisão: \/skills approve validar-mudancas/);
-    assert.equal(getSkill(sb.root, "validar-mudancas"), null);
-    assert.equal(listPending(sb.root).length, 1);
+    assert.match(r.text, /criada em teste/);
+    assert.equal(getSkill(sb.root, "validar-mudancas")!.status, "trial");
+    assert.equal(listPending(sb.root).length, 0);
   } finally { sb.cleanup(); }
 });
 
@@ -185,13 +185,13 @@ async function callSkillSaveOverMcp(root: string, home: string, mode: string | u
   } finally { await client.close(); }
 }
 
-test("servidor MCP real: BRITO_PERMS_MODE=bypass faz skill_save virar proposta pendente", { timeout: 60_000 }, async () => {
+test("servidor MCP real: BRITO_PERMS_MODE=bypass faz skill_save gravar em teste", { timeout: 60_000 }, async () => {
   const sb = sandbox();
   try {
     const text = await callSkillSaveOverMcp(sb.root, sb.home, "bypass");
-    assert.match(text, /aguardando revisão/);
-    assert.equal(getSkill(sb.root, "validar-mudancas"), null);
-    assert.equal(listPending(sb.root).length, 1);
+    assert.match(text, /criada em teste/);
+    assert.equal(getSkill(sb.root, "validar-mudancas")!.status, "trial");
+    assert.equal(listPending(sb.root).length, 0);
   } finally { sb.cleanup(); }
 });
 

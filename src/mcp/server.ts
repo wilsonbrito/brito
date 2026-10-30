@@ -21,7 +21,7 @@ export const MCP_INSTRUCTIONS = [
   "- Para localizar código, use graph_search/graph_context antes de ler arquivos; antes de alterar, meça o impacto com graph_callers/graph_impact. O grafo se atualiza sozinho após edições (graph_index só força).",
   `- O grafo cobre ${INDEXED_EXTENSIONS.join(", ")} (em .svelte/.vue/.astro, o script e as chamadas do template). Imports relativos e por alias (paths/baseUrl do tsconfig, imports do package.json, $lib do SvelteKit) viram arestas. Em Java, Kotlin, Go, Ruby, PHP, C# e Rust os imports são resolvidos pelo pacote/namespace/módulo e o receptor de uma chamada é casado com o tipo pelo nome (sem inferência de tipos). Outras linguagens e arquivos ignorados pelo .gitignore não entram: use busca de texto para eles.`,
   "- recall/remember: notas duráveis (decisões, convenções, bugs descobertos). Consulte recall ao começar uma tarefa.",
-  "- skill_load: carregue a skill antes de uma tarefa que ela cobre. No modo \"tudo liberado\", skill_save vira proposta pendente que o usuário aprova com /skills approve.",
+  "- skill_load: carregue a skill antes de uma tarefa que ela cobre. No modo \"tudo liberado\", skill_save grava em teste; só o arriscado (comando destrutivo, mudança em skill aprovada) vira proposta pendente para /skills approve.",
 ].join("\n");
 
 /**

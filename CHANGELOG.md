@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.5 — 2026-10-30
+
+Brito now creates and edits skills on its own in "allow everything" mode.
+
+### Changed
+- In "allow everything" mode, `skill_save` (and the MCP server) no longer sends every skill to the review queue. Safe skills are saved as *in trial* and promoted or archived by results, like the autonomous reflection path. Skills with destructive commands, and changes to skills you approved, still wait for `/skills approve`.
+
 ## 0.7.4 — 2026-10-29
 
 Follow-up fix for the terminal resize glitch.
