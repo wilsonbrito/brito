@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.4 — 2026-10-29
+
+Follow-up fix for the terminal resize glitch.
+
+### Fixed
+- Resizing the terminal quickly (e.g. dragging the window edge) could still leave duplicated status bars and input boxes on screen. The dock now handles one resize at a time and no longer guesses its position when the terminal does not answer.
+
 ## 0.7.3 — 2026-10-29
 
 Fixes the terminal interface breaking when the window is resized.
