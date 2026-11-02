@@ -29,7 +29,7 @@ import { expireTrials, skillsMode } from "./skills/trial.js";
 import { claudeCliComplete } from "./skills/learn-cli.js";
 import type { TurnRecord } from "./agent/loop.js";
 import type { Msg } from "./provider/types.js";
-import { buildSystemPrompt, graphStatsLine } from "./agent/prompt.js";
+import { buildSystemPrompt, graphStatsLine, memoSystem, systemKey } from "./agent/prompt.js";
 import { allTools } from "./tools/registry.js";
 import { ui, c, fmtTokens } from "./ui/ui.js";
 import { runRepl, switchableBackend, type ReplBackend, type SwitchableBackend } from "./repl.js";
@@ -373,8 +373,13 @@ async function buildApiBackend(root: string, model: string, io: { ask: (q: strin
 
   const ctx: ToolContext = { root, graph, ask: (q, opts) => io.ask(q, opts), sync, dirty: false, loadedSkills: o.loadedSkills ?? new Set() };
   const fallback = o.fallback ?? newFallbackState(model);
-  // Função: o índice de skills e a contagem do grafo são relidos a cada passo e refletem o que mudou na sessão.
-  const agent = new Agent(() => buildSystemPrompt(root, graphStatsLine(symCount, noteCount, "now"), skillsIndex(root)) + (perms.mode === "plan" ? PLAN_NOTE : ""), ctx, { model, fallback });
+  // Refeito só quando muda o modo plano, o grafo deixa de estar vazio ou o conjunto de skills muda: um system
+  // estável mantém o cache de prompt da conversa (veja memoSystem).
+  const system = memoSystem(
+    () => systemKey(root, perms.mode === "plan", symCount + noteCount === 0),
+    () => buildSystemPrompt(root, graphStatsLine(symCount, noteCount, "now"), skillsIndex(root)) + (perms.mode === "plan" ? PLAN_NOTE : ""),
+  );
+  const agent = new Agent(system, ctx, { model, fallback });
   if (o.messages) agent.messages = o.messages;
   if (o.effort) agent.effort = o.effort as Effort;
   ctx.model = () => agent.model; // subagentes seguem o modelo vivo

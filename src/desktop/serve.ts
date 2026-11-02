@@ -13,7 +13,7 @@ import { Agent, type TurnRecord } from "../agent/loop.js";
 import { ClaudeSession, hasClaudeCli, historyForFallback } from "../agent/claude-cli.js";
 import { startApprovalServer } from "../agent/approval.js";
 import { loadProjectAgents } from "../agent/agents.js";
-import { buildSystemPrompt, graphStatsLine } from "../agent/prompt.js";
+import { buildSystemPrompt, graphStatsLine, memoSystem, systemKey } from "../agent/prompt.js";
 import type { TurnSink } from "../agent/sink.js";
 import { openGraphAfterClaude } from "../graph/store.js";
 import { indexProject } from "../graph/indexer.js";
@@ -124,10 +124,11 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
     try { notes = Number((await graph.run("MATCH (s:Note) RETURN count(s) AS n"))[0].n); } catch { /* sem notas */ }
     const ctx: ToolContext = { root, graph, ask, sync, dirty: false, loadedSkills: o.loadedSkills ?? new Set(), model: () => agent.model };
     const fallback = o.fallback ?? newFallbackState(model);
-    const agent = new Agent(
+    const system = memoSystem(
+      () => systemKey(root, perms.mode === "plan", syms + notes === 0),
       () => buildSystemPrompt(root, graphStatsLine(syms, notes, "now"), skillsIndex(root)) + (perms.mode === "plan" ? PLAN_NOTE : ""),
-      ctx, { model, sink, fallback },
     );
+    const agent = new Agent(system, ctx, { model, sink, fallback });
     if (o.messages) agent.messages = o.messages;
     if (o.effort) agent.effort = o.effort as Effort;
     let ac: AbortController | null = null;

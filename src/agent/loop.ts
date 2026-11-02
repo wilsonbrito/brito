@@ -159,11 +159,14 @@ export class Agent {
       return await providerFor(this.model).send(
         {
           model: this.model,
-          maxTokens: target.kind === "openai" && thinking ? 16_384 : 8192,
+          // Na Anthropic a resposta vem por streaming, então o teto pode ser alto sem risco de timeout: um
+          // write_file grande não é mais cortado no meio.
+          maxTokens: target.kind === "openai" ? (thinking ? 16_384 : 8192) : 32_000,
           system: typeof this.system === "function" ? this.system() : this.system,
           tools: toApiTools(this.opts.tools),
           messages: this.messages,
           thinking,
+          effort: this.effort,
         },
         hooks,
       );

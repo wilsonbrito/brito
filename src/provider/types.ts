@@ -18,6 +18,8 @@ export interface ModelRequest {
   maxTokens: number;
   /** raciocínio do modelo; indefinido = ligado. Provedores sem esse controle ignoram. */
   thinking?: boolean;
+  /** nível do `/reasoning` (`low`…`max`); vazio = padrão do modelo. Só a API da Anthropic usa. */
+  effort?: string;
 }
 
 export interface ModelMessage {

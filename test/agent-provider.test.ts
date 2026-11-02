@@ -66,6 +66,7 @@ test("raciocínio segue o esforço", async () => {
   agent.effort = "";
   await agent.send("2");
   assert.deepEqual(reqs.map((r) => r.thinking), [false, true]);
+  assert.deepEqual(reqs.map((r) => r.effort), ["none", ""]);
   sb.cleanup();
 });
 
@@ -152,7 +153,8 @@ test("perfil com raciocínio ligado ganha orçamento maior de tokens", async () 
   await agent.send("2");
   agent.model = "sonnet";
   await agent.send("3");
-  assert.deepEqual(reqs.map((r) => r.maxTokens), [16384, 8192, 8192]);
+  // Claude (streaming): teto alto para um write_file grande não ser cortado
+  assert.deepEqual(reqs.map((r) => r.maxTokens), [16384, 8192, 32000]);
   sb.cleanup();
 });
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+Cheaper and smarter turns with an Anthropic API key.
+
+### Changed
+- The conversation is now prompt-cached, not only the system prompt. Each step of a multi-tool turn reads the earlier history from cache instead of paying for it again.
+- The system prompt stays byte-identical during a session. It is rebuilt only when plan mode toggles, the graph stops being empty or the set of skills changes, so a graph sync or a skill being used no longer invalidates the cache.
+- `/reasoning` now applies to the Anthropic API (it used to affect only the `claude` CLI and OpenAI-compatible endpoints): the level is sent as `output_config.effort`. `none` turns thinking off where the model allows it (`between_tools` on Sonnet 5.5) and becomes effort `low` on models whose thinking cannot be disabled (Opus 5.5, Fable).
+- Responses from Claude can be up to 32k tokens (was 8192), so a large `write_file` is no longer cut off. Requests always stream.
+
 ## 0.7.5 — 2026-10-30
 
 Brito now creates and edits skills on its own in "allow everything" mode.

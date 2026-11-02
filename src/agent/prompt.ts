@@ -41,7 +41,31 @@ Data: ${new Date().toISOString().slice(0, 10)}${shellNote()}${skills ? `\n\n# Sk
 }
 
 import type { AgentDef } from "./agents.js";
-import { skillsIndex } from "../skills/store.js";
+import { listSkills, skillsIndex } from "../skills/store.js";
+
+/**
+ * Repete o system prompt anterior enquanto `key()` não muda. O cache de prompt da API é um prefixo: qualquer byte
+ * diferente no system (a contagem de símbolos após um sync, a ordem das skills por uso) invalidaria o cache da
+ * conversa inteira a cada passo. A chave lista só o que muda o que o modelo deve fazer.
+ */
+export function memoSystem(key: () => string, build: () => string): () => string {
+  let last: string | undefined;
+  let value = "";
+  return () => {
+    const k = key();
+    if (k !== last) { last = k; value = build(); }
+    return value;
+  };
+}
+
+/**
+ * Chave do `memoSystem` da sessão principal: modo plano, grafo vazio ou não (o aviso de "grafo vazio" muda a
+ * orientação) e o conjunto de skills com o status. Contagens e ordem por uso ficam de fora de propósito.
+ */
+export function systemKey(root: string, planMode: boolean, graphEmpty: boolean): string {
+  const skills = listSkills(root).map((s) => `${s.name}:${s.scope}:${s.status}`).sort().join(",");
+  return `${planMode}|${graphEmpty}|${skills}`;
+}
 
 export function buildSubagentPrompt(root: string, def: AgentDef): string {
   return `${def.prompt}
