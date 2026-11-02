@@ -2,6 +2,7 @@ import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { GraphStore } from "../graph/store.js";
 import { perms } from "../permissions.js";
+import type { Todo } from "../util/todos.js";
 
 export interface ToolContext {
   root: string;
@@ -18,6 +19,8 @@ export interface ToolContext {
   loadedSkills?: Set<string>;
   /** modelo vivo do agente principal (subagentes ficam no mesmo provedor) */
   model?: () => string;
+  /** lista de tarefas da sessão (`todo_write`); vai junto ao salvar a sessão */
+  todos?: Todo[];
 }
 
 export interface Tool<S extends z.ZodObject<any> = z.ZodObject<any>> {

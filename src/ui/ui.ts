@@ -2,6 +2,7 @@ import { BOLD, CODE, ITALIC, OFF, c, cols, palette, useColor } from "./theme.js"
 import type { Dock } from "./dock.js";
 import { renderBanner, type BannerInfo } from "./banner.js";
 import { renderTable } from "./table.js";
+import { todoLine, type Todo } from "../util/todos.js";
 import stringWidth from "string-width";
 
 export const NAME = "Brito";
@@ -300,6 +301,14 @@ class UI {
     this.running.delete(id);
     this.textEnd();
     this.print(this.toolLine(r.name, r.input, Date.now() - r.t0, isError));
+    if (r.name === "todo_write" && !isError) this.printTodos((r.input as { todos?: Todo[] })?.todos ?? []);
+  }
+  /** A lista do `todo_write`, logo abaixo da linha da tool: em andamento destacado, concluído apagado. */
+  printTodos(todos: Todo[]) {
+    for (const t of todos) {
+      const line = todoLine(t);
+      this.print(`  ${t.status === "in_progress" ? c.bold(c.soft(line)) : t.status === "completed" ? c.dim(line) : c.muted(line)}`);
+    }
   }
   /** Só o prefixo + emoji + nome, sem argumento nem tempo. */
   toolLabel(name: string) { return `${c.accent("┊")} ${emojiOf(name)} ${c.soft(name)}`; }

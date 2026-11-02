@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+Resume where you left off, and a visible task list.
+
+### Added
+- Sessions are saved per project in `.brito/sessions/` (git-ignored). `brito -c` resumes the most recent one and `brito --resume <id>` a specific one (the first characters of the id are enough); `brito sessions` and `/sessions` list them. In API mode Brito keeps the whole history; in `claude` CLI mode it keeps the session id and resumes through the CLI. A session reopens in the engine that recorded it. Attached images are not written to disk.
+- The desktop app now really resumes API-mode conversations when it reopens (it used to show them while the model started over).
+- `todo_write` tool: on multi-step tasks the agent keeps a task list, shown under the tool line in the terminal, in the desktop app and with `/todos`. It is saved with the session. Subagents cannot change it.
+
+### Changed
+- `/clear` starts a new session; the previous one stays saved.
+
 ## 0.7.5 — 2026-10-30
 
 Brito now creates and edits skills on its own in "allow everything" mode.

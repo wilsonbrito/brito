@@ -130,6 +130,8 @@ cd your-project
 brito                       # opens the REPL
 brito "who calls parseConfig?"   # single prompt, no REPL
 brito index                 # (re)index the graph; it is also kept up to date automatically
+brito -c                    # resume the most recent session in this project
+brito sessions              # list saved sessions; resume one with brito --resume <id>
 brito query "MATCH (c:Symbol {kind:'component'})-[:CALLS]->(f:Symbol) RETURN c.file, f.name LIMIT 5"
 ```
 
@@ -153,7 +155,9 @@ OK: 20 arquivos, 66 símbolos, 54 chamadas, 17 imports | +0 ~0 -0 =20 (28ms)
 | `/learn` | extract skills from the last turn now |
 | `/agents`, `/tools`, `/index`, `/context` | inspect subagents, tools, the index and the context window |
 | `!command` | run a shell command directly, without calling the model |
-| `/clear`, `/exit` | clear the conversation, quit |
+| `/todos` | show the session's task list (the agent keeps it with `todo_write` on multi-step tasks) |
+| `/sessions` | list this project's saved sessions |
+| `/clear`, `/exit` | start another conversation (the previous one stays saved), quit |
 
 ## What the graph indexes
 
@@ -229,7 +233,7 @@ Project data lives in `.brito/` (graph, project skills, agents) and global data 
 ## Limitations
 
 - Early software (v0.5.0), one maintainer.
-- The desktop app is new: a single window (no tabs yet), and with an API key (no `claude` CLI) the model does not resume a conversation after you reopen the app, although the screen shows it.
+- The desktop app is new: a single window (no tabs yet). API-mode conversations from before this version are not resumed when you reopen the app (new ones are, from `.brito/sessions`).
 - **The interface and the agent's default language are Brazilian Portuguese.** Translating them is a welcome contribution.
 - Skill learning is a heuristic: it proposes, you decide. Expect some proposals to be rejected.
 

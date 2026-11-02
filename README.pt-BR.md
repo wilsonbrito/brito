@@ -126,6 +126,8 @@ cd seu-projeto
 brito                       # abre o REPL
 brito "quem chama parseConfig?"   # prompt único, sem REPL
 brito index                 # (re)indexa o grafo; ele também se mantém atualizado sozinho
+brito -c                    # retoma a sessão mais recente deste projeto
+brito sessoes               # lista as sessões salvas; retome uma com brito --resume <id>
 brito query "MATCH (c:Symbol {kind:'component'})-[:CALLS]->(f:Symbol) RETURN c.file, f.name LIMIT 5"
 ```
 
@@ -149,7 +151,9 @@ OK: 20 arquivos, 66 símbolos, 54 chamadas, 17 imports | +0 ~0 -0 =20 (28ms)
 | `/learn` | extrai skills do último turno agora |
 | `/agents`, `/tools`, `/index`, `/context` | inspecionam subagentes, tools, o índice e a janela de contexto |
 | `!comando` | roda um comando no shell direto, sem chamar o modelo |
-| `/clear`, `/exit` | limpa a conversa, sai |
+| `/todos` | mostra a lista de tarefas da sessão (o agente a mantém com `todo_write` em tarefas de vários passos) |
+| `/sessions` | lista as sessões salvas deste projeto |
+| `/clear`, `/exit` | começa outra conversa (a anterior continua salva), sai |
 
 ## O que o grafo indexa
 
@@ -232,7 +236,7 @@ Os dados do projeto ficam em `.brito/` (grafo, skills do projeto, agentes) e os 
 ## Limitações
 
 - Software em fase inicial (v0.5.0), um mantenedor.
-- O app de desktop é novo: uma janela só (sem abas ainda) e, com chave de API (sem o `claude` CLI), o modelo não retoma a conversa ao reabrir o app, embora a tela a mostre.
+- O app de desktop é novo: uma janela só (sem abas ainda). Conversas do modo API feitas antes desta versão não são retomadas ao reabrir o app (as novas são, a partir de `.brito/sessions`).
 - **A interface e o idioma padrão do agente são português do Brasil.** Traduzi-los é uma contribuição bem-vinda.
 - O aprendizado de skills é heurístico: ele propõe, você decide. Espere rejeitar algumas propostas.
 

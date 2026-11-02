@@ -13,7 +13,8 @@ let seq = 0;
 function toolSet(def: AgentDef): Set<string> {
   const names = def.tools === "all" ? allTools().map((t) => t.name) : def.tools;
   // Sem recursão e sem aprender: criar/alterar skills é papel do agente principal.
-  return new Set(names.filter((n) => !["delegate", "skill_save", "skill_delete", "exit_plan"].includes(n)));
+  // A lista de tarefas é do usuário com o agente principal: um subagente não a reescreve.
+  return new Set(names.filter((n) => !["delegate", "skill_save", "skill_delete", "exit_plan", "todo_write"].includes(n)));
 }
 
 /** Agente somente-leitura: nenhuma tool dele escreve arquivos ou exige aprovação. */
