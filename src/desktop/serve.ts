@@ -9,7 +9,9 @@ import "../tools/graph.js";
 import "../tools/delegate.js";
 import "../tools/plan.js";
 import "../tools/skills.js";
+import "../tools/todo.js";
 import { Agent, type TurnRecord } from "../agent/loop.js";
+import { loadSession, repairHistory, saveSession, titleOf, type SavedSession } from "../agent/sessions.js";
 import { ClaudeSession, hasClaudeCli, historyForFallback } from "../agent/claude-cli.js";
 import { startApprovalServer } from "../agent/approval.js";
 import { loadProjectAgents } from "../agent/agents.js";
@@ -78,6 +80,8 @@ interface ApiEngineOpts {
   messages?: Msg[];
   effort?: string;
   loadedSkills?: Set<string>;
+  /** sessão salva a retomar (a janela reabriu com o id dela) */
+  session?: SavedSession;
   /** motor claude CLI de onde veio a troca: `config` com um Claude volta para ele */
   back?: {
     engine: Engine; costUsd: () => number; handoff: (turns: TurnRecord[], label: string) => void;
@@ -131,8 +135,16 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
     const agent = new Agent(system, ctx, { model, sink, fallback });
     if (o.messages) agent.messages = o.messages;
     if (o.effort) agent.effort = o.effort as Effort;
+    if (o.session?.messages) agent.messages = repairHistory(o.session.messages);
+    if (o.session?.todos) ctx.todos = o.session.todos;
     let ac: AbortController | null = null;
-    const id = randomUUID();
+    const id = o.session?.id ?? randomUUID();
+    // Depois de uma troca a partir do claude CLI quem guarda a conversa é ele (o id é o dele): nada a salvar aqui.
+    const persist = () => {
+      if (o.back || !agent.messages.length) return;
+      try { saveSession(root, { id, engine: "api", model: agent.model, title: titleOf(agent.messages), messages: agent.messages, todos: ctx.todos }); }
+      catch (e: any) { sink.warn(`não consegui salvar a sessão: ${e?.message ?? e}`); }
+    };
     return {
       kind: "api", effort: "", fallback,
       // Depois da troca o id segue o do claude: a janela o guarda para retomar a conversa ao reabrir.
@@ -160,7 +172,7 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
         ac = new AbortController();
         sink.turnStart();
         let ok = true;
-        try { await agent.send(text, ac.signal); } catch (e: any) { ok = false; ac.signal.aborted ? sink.warn("⏹ interrompido") : sink.error(e?.message ?? String(e)); } finally { sink.turnEnd(ok); ac = null; }
+        try { await agent.send(text, ac.signal); } catch (e: any) { ok = false; ac.signal.aborted ? sink.warn("⏹ interrompido") : sink.error(e?.message ?? String(e)); } finally { sink.turnEnd(ok); ac = null; persist(); }
       },
       abort: () => ac?.abort(),
       reset: () => {
@@ -173,14 +185,17 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
   };
 
   if (opening.kind !== "claude") {
-    if (resumeId) emit({ t: "info", msg: "No modo API o histórico da conversa não é retomado ao reabrir; a tela mostra o que já foi dito, mas o modelo recomeça." });
+    // O id que a janela guarda é o da sessão salva em .brito/sessions: reabrir retoma o histórico de verdade.
+    const saved = resumeId ? loadSession(root, resumeId) : null;
+    const session = saved?.engine === "api" ? saved : undefined;
+    if (resumeId && !session) emit({ t: "info", msg: "Esta conversa não foi salva no modo API (é de uma versão antiga ou do claude CLI): a tela mostra o que já foi dito, mas o modelo recomeça." });
     if (opening.kind === "fallback") {
       // Claude sem conta nenhuma, com o fallback pronto: a sessão já nasce no qwen (com aviso, nunca em silêncio).
       emit({ t: "warn", msg: `⚠ ${NO_ANTHROPIC} (sem ANTHROPIC_API_KEY e sem o claude CLI) — abrindo no ${opening.label}. Envie /fallback para detalhes.` });
       const fallback = newFallbackState(startModel);
       activateFallback(fallback, NO_ANTHROPIC);
-      engine = await buildApiEngine(FALLBACK_PROFILE, { fallback, engineLabel: () => NO_ANTHROPIC });
-    } else engine = await buildApiEngine(startModel);
+      engine = await buildApiEngine(FALLBACK_PROFILE, { fallback, engineLabel: () => NO_ANTHROPIC, session });
+    } else engine = await buildApiEngine(startModel, { session });
   } else {
     const approval = startApprovalServer({ ask }, root);
     closeApproval = approval.close;

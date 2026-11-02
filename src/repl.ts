@@ -98,7 +98,7 @@ const COMMON: Record<string, string> = {
   "/indicadores": "explica os números da barra de status",
   "/skills": "lista; pending | approve <nome> | reject <nome> | consolidate | rm <nome> | promote <nome>",
   "/modo": "mostra ou troca o modo (manual, auto, plano) — ou Shift+Tab",
-  "/clear": "limpa a conversa",
+  "/clear": "começa outra conversa (a anterior fica salva)",
   "/sair": "encerra (ou Ctrl+C duas vezes)",
 };
 

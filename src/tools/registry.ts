@@ -3,6 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { GraphStore } from "../graph/store.js";
 import { perms } from "../permissions.js";
 import { decide, loadRules } from "../rules.js";
+import type { Todo } from "../util/todos.js";
 
 export interface ToolContext {
   root: string;
@@ -21,6 +22,8 @@ export interface ToolContext {
   model?: () => string;
   /** arquivos lidos na sessão (caminho absoluto → estado no momento da leitura); edições exigem leitura atual */
   readFiles?: Map<string, FileStamp>;
+  /** lista de tarefas da sessão (`todo_write`); vai junto ao salvar a sessão */
+  todos?: Todo[];
 }
 
 export interface FileStamp { mtimeMs: number; size: number }
