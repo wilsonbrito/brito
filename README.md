@@ -18,7 +18,7 @@ Brito is an agent for software development. Use it in the terminal (`brito-cli` 
 - **Wide coverage.** TypeScript/JavaScript, Python and the script blocks of `.svelte`, `.vue` and `.astro` components. Import aliases (`tsconfig` paths, `package.json` imports, SvelteKit's `$lib`) become real edges. Files ignored by `.gitignore` stay out.
 - **Skills that learn on their own, on probation.** After a task that tripped or was corrected, Brito reflects and creates a skill *in trial* without interrupting you. A skill proves itself by use: 3 clean uses promote it, 2 stumbles archive it (recoverable). Anything risky, or any change to a skill you approved, still waits for your `/skills approve`. `BRITO_SKILLS=ask` restores approval-for-everything; `off` disables learning.
 - **Safety rails for what gets learned.** A lint rejects secrets, credentials embedded in URLs, `curl | sh` and prompt-injection phrasing, and **warns about destructive commands** (see below).
-- **Permission modes.** manual, auto-edits, plan and "everything allowed" (`Shift+Tab` cycles them). Autonomous skills do not depend on the mode: they are created in trial and judged by results.
+- **Permission modes and rules.** manual, auto-edits, plan and "everything allowed" (`Shift+Tab` cycles them), plus `allow`/`deny` rules per command or path (see [Permission rules](#permission-rules)). Editing a file requires having read it in the session, unchanged since. Autonomous skills do not depend on the mode: they are created in trial and judged by results.
 - **Two backends, one interface.** Use an Anthropic API key, or your Claude Code subscription through the `claude` CLI. Brito never reads or sends your subscription token.
 - **Terminal or desktop app.** `npm i -g brito-cli` gives you the `brito` command; the desktop app is a native executable with a window (projects and sessions in a sidebar, chat, permission prompts), no Node or terminal needed. See [Install](#install).
 - **Images.** Drag an image file into the prompt (or paste its path) and it is attached to the turn: PNG, JPEG, GIF or WebP, up to 5 MB.
@@ -150,6 +150,7 @@ OK: 20 arquivos, 66 símbolos, 54 chamadas, 17 imports | +0 ~0 -0 =20 (28ms)
 | `/fallback` | shows the main model and the fallback (qwen), and whether the switch already happened |
 | `/modo` or `Shift+Tab` | switch permission mode: manual → auto-edits → plan → bypass ("everything allowed") |
 | `/skills` | list skills · `pending` · `approve <name>` · `reject <name>` · `consolidate` · `rm <name>` · `promote <name>` |
+| `/permissions` | list permission rules · `allow <rule>` · `deny <rule>` |
 | `/learn` | extract skills from the last turn now |
 | `/agents`, `/tools`, `/index`, `/context` | inspect subagents, tools, the index and the context window |
 | `!command` | run a shell command directly, without calling the model |
@@ -162,6 +163,26 @@ OK: 20 arquivos, 66 símbolos, 54 chamadas, 17 imports | +0 ~0 -0 =20 (28ms)
 - **Imports:** relative and aliased. Resolves `paths`/`baseUrl` from `tsconfig.json`/`jsconfig.json` (following relative `extends`, like `.svelte-kit/tsconfig.json`), `package.json` `imports` (`#internal/*`) and SvelteKit's `$lib`. Configuration applies per file (nearest config), so monorepos work; editing a tsconfig re-indexes the affected files.
 - **Backend languages:** the graph holds classes/interfaces/structs/traits/enums/modules, functions and methods (`Class.method`), calls and imports. Imports name a package, not a path, so Brito matches them against the end of your files' paths (`com.acme.Repo` ↔ `src/main/java/com/acme/Repo.java`; PHP PSR-4 namespaces; Rust `use crate::…`; Ruby `require`/`require_relative`; Go packages through the `go.mod` module path). External packages (`java.util`, `serde`, `github.com/gin-gonic/gin`) never match and create no edges. There is no type inference: a call like `userRepository.save()` is linked by matching the receiver name to a type in the project (`UserRepository`), `this`/`self`/receivers resolve to the enclosing class, and a bare call inside a class tries the class's own methods first.
 - **Not yet:** `extends` by package (`@tsconfig/node20`), sibling-workspace `exports`, and function references without a call in a template (`onclick={fn}`). Calls are resolved statically with name-based fallbacks, so dynamic dispatch and reflection are not captured.
+
+## Permission rules
+
+To stop approving the same command every time (without resorting to "everything allowed"), declare rules in `.brito/settings.json` (per project, can be committed), `.brito/settings.local.json` (just you) or `~/.brito/settings.json` (all projects). The lists add up.
+
+```json
+{
+  "permissions": {
+    "allow": ["bash(npm test:*)", "bash(npm run typecheck)", "bash(git status:*)", "edit_file(src/**)"],
+    "deny": ["bash(git push:*)", "bash(rm -rf*)", "read_file(.env*)"]
+  }
+}
+```
+
+- `tool` matches any use; `tool(pattern)` narrows it. In `bash`, `*` matches anything and a trailing `:*` matches the prefix alone or followed by arguments (`git status:*` allows `git status --short`, not `git statusx`). In paths, `*` does not cross directories and `**` does.
+- **`allow` skips the prompt** in manual and auto-edits modes. Plan mode still blocks.
+- **`deny` always blocks**, even in "everything allowed".
+- A compound command is allowed only if **every piece** (`&&`, `||`, `;`, `|`) matches a rule: `bash(npm test*)` does not allow `npm test && rm -rf ~`. Commands with `$(...)`, backticks or redirection to a file are never allowed by a rule; `2>&1` and `> /dev/null` are fine.
+- The rules also apply to the `claude` CLI's Bash, Edit and Write when Brito runs on your subscription.
+- `/permissions` lists the rules; `/permissions allow bash(npm test:*)` writes to `.brito/settings.json`.
 
 ## Databases and other sensitive resources
 

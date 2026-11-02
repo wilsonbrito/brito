@@ -19,6 +19,7 @@ import { FALLBACK_PROFILE, NO_ANTHROPIC, fallbackStatus, learnerModel, openEngin
 import { activateFallback, chooseModel, cliShouldFallBack, fallbackWarning, newFallbackState, onceRestore, renderFallback, retryPrompt, type FallbackState } from "./provider/fallback.js";
 import { compactAtFor, contextWindowFor, resolveModel } from "./provider/resolve.js";
 import { startApprovalServer } from "./agent/approval.js";
+import { addRule, loadRules, projectSettingsPath } from "./rules.js";
 import { serveMcp } from "./mcp/server.js";
 import "./tools/skills.js";
 import type { ToolContext } from "./tools/registry.js";
@@ -261,6 +262,28 @@ function modelCommand(get: () => string, set: (m: string) => void, note: string,
 }
 
 /** `/skills`: lista, revisa propostas pendentes e consolida a biblioteca. Vale para os dois backends. */
+/** `/permissions` lista as regras; `allow <regra>` / `deny <regra>` grava no `.brito/settings.json` do projeto. */
+const permissionsCommand = (root: string) => ({
+  desc: "regras de permissão; allow <regra> | deny <regra>",
+  run: async ([sub, ...rest]: string[]) => {
+    if (sub === "allow" || sub === "deny") {
+      const rule = rest.join(" ").trim();
+      if (!rule) { ui.print(c.muted(`  uso: /permissions ${sub} bash(npm test:*)  ·  /permissions ${sub} edit_file(src/**)`)); return; }
+      try { addRule(root, sub, rule); ui.info(`${sub}: ${rule} → ${path.relative(root, projectSettingsPath(root))}`); }
+      catch (e: any) { ui.error(e?.message ?? String(e)); }
+      return;
+    }
+    const r = loadRules(root);
+    if (!r.allow.length && !r.deny.length) {
+      ui.print(c.muted("  nenhuma regra. Ex.: /permissions allow bash(npm test:*)  ·  /permissions deny bash(git push:*)"));
+      return;
+    }
+    for (const a of r.allow) ui.print(`  ${c.soft("allow")} ${a}`);
+    for (const d of r.deny) ui.print(`  ${c.soft("deny ")} ${d}`);
+    ui.print(c.muted("  ~/.brito/settings.json · .brito/settings.json · .brito/settings.local.json"));
+  },
+});
+
 const skillsCommand = (root: string, io: { ask: (q: string, opts?: { force?: boolean }) => Promise<boolean> }, llm: { complete: Complete; model: () => string }) => ({
   desc: "lista skills; pending | approve <nome> | reject <nome> | consolidate",
   run: async ([sub, name]: string[]) => {
@@ -430,6 +453,7 @@ async function buildApiBackend(root: string, model: string, io: { ask: (q: strin
       "/index": { desc: "reconstrói o grafo do zero", run: async () => { ui.info("reconstruindo grafo…"); ui.print(c.muted(JSON.stringify(await indexProject(root, graph, { full: true })))); } },
       "/learn": { desc: "extrai skills do último turno agora", run: async () => { await learn(true); } },
       "/skills": skillsCommand(root, io, { complete: defaultComplete, model: learnModel }),
+      "/permissions": permissionsCommand(root),
     },
     close: async () => { await graph.close(); },
   };
@@ -450,7 +474,7 @@ let approvalServer: ReturnType<typeof startApprovalServer> | null = null;
  * `/model <claude>` lá volta para cá. Também serve ao prompt único, que não troca de motor pelo `/model`.
  */
 async function buildClaudeBackend(root: string, io: Io, sw: () => SwitchableBackend, model?: string, openGraph?: GraphStore) {
-  approvalServer ??= startApprovalServer({ ask: (q, opts) => io.ask(q, opts) });
+  approvalServer ??= startApprovalServer({ ask: (q, opts) => io.ask(q, opts) }, root);
   // O banco aceita um único processo com acesso de escrita: indexa, lê as stats e solta o banco para o servidor MCP.
   // `openGraph`: o do modo API, que é fechado aqui só depois de indexar (se falhar antes, continua aberto para ele).
   const graph = openGraph ?? await GraphStore.open(root);
@@ -567,6 +591,7 @@ async function buildClaudeBackend(root: string, io: Io, sw: () => SwitchableBack
       "/context": unavailable,
       "/learn": { desc: "extrai skills do último turno agora", run: async () => { await learn(true); } },
       "/skills": skillsCommand(root, io, { complete: claudeCliComplete, model: () => process.env.BRITO_LEARN_MODEL ?? "" }),
+      "/permissions": permissionsCommand(root),
     },
     close: async () => {},
   };
