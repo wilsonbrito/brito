@@ -2,6 +2,7 @@ import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { GraphStore } from "../graph/store.js";
 import { perms } from "../permissions.js";
+import { decide, loadRules } from "../rules.js";
 
 export interface ToolContext {
   root: string;
@@ -18,7 +19,11 @@ export interface ToolContext {
   loadedSkills?: Set<string>;
   /** modelo vivo do agente principal (subagentes ficam no mesmo provedor) */
   model?: () => string;
+  /** arquivos lidos na sessão (caminho absoluto → estado no momento da leitura); edições exigem leitura atual */
+  readFiles?: Map<string, FileStamp>;
 }
+
+export interface FileStamp { mtimeMs: number; size: number }
 
 export interface Tool<S extends z.ZodObject<any> = z.ZodObject<any>> {
   name: string;
@@ -36,6 +41,8 @@ export interface Tool<S extends z.ZodObject<any> = z.ZodObject<any>> {
   readsGraph?: boolean;
   /** descrição curta da ação para o prompt de permissão */
   describe?: (input: z.infer<S>, ctx: ToolContext) => string;
+  /** checagem barata antes da aprovação; devolve o erro para o modelo ou `undefined` se a chamada pode seguir */
+  precheck?: (input: z.infer<S>, ctx: ToolContext) => string | undefined;
   run: (input: z.infer<S>, ctx: ToolContext) => Promise<string>;
 }
 
@@ -69,9 +76,15 @@ export async function execTool(name: string, input: unknown, ctx: ToolContext): 
   if (!tool) return { text: `Tool desconhecida: ${name}`, isError: true };
   const parsed = tool.schema.safeParse(input);
   if (!parsed.success) return { text: `Input inválido: ${z.prettifyError(parsed.error)}`, isError: true };
+  // `deny` vale em qualquer modo, inclusive "tudo liberado"; `allow` só dispensa a pergunta.
+  const decision = decide(loadRules(ctx.root), tool.name, parsed.data, ctx.root);
+  if (decision === "deny") return { text: `${tool.name} bloqueada por uma regra deny das permissões (.brito/settings.json). Não tente contornar; peça ao usuário se precisar.`, isError: true };
+  // Antes da aprovação: não faz sentido o usuário aprovar uma chamada que vai falhar.
+  const problem = tool.precheck?.(parsed.data, ctx);
+  if (problem) return { text: problem, isError: true };
   if (tool.dangerous) {
     if (perms.mode === "plan") return { text: `Modo plano: ${tool.name} está bloqueada. Termine o plano e chame exit_plan para pedir aprovação.`, isError: true };
-    const skip = perms.mode === "bypass" || (perms.mode === "auto" && tool.edit);
+    const skip = perms.mode === "bypass" || (perms.mode === "auto" && tool.edit) || decision === "allow";
     const ok = skip || await ctx.ask(`${tool.name}: ${tool.describe?.(parsed.data, ctx) ?? JSON.stringify(parsed.data).slice(0, 200)}`);
     if (!ok) return { text: "Usuário negou a execução.", isError: true };
   }

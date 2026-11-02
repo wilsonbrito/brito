@@ -181,7 +181,7 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
       engine = await buildApiEngine(FALLBACK_PROFILE, { fallback, engineLabel: () => NO_ANTHROPIC });
     } else engine = await buildApiEngine(startModel);
   } else {
-    const approval = startApprovalServer({ ask });
+    const approval = startApprovalServer({ ask }, root);
     closeApproval = approval.close;
     // O banco aceita um único processo com escrita: indexa, lê as stats e solta o banco para o servidor MCP.
     if (!isHome) try {

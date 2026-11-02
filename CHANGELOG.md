@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+Permission rules, and no more edits made from memory.
+
+### Added
+- Permission rules in `.brito/settings.json`, `.brito/settings.local.json` or `~/.brito/settings.json`: `allow` skips the prompt for matching commands or paths (e.g. `bash(npm test:*)`, `edit_file(src/**)`), `deny` blocks them in every mode, including "everything allowed". A compound command is allowed only if every piece matches, and commands with `$(...)`, backticks or file redirection are never allowed by a rule. The rules also apply to the `claude` CLI's Bash, Edit and Write.
+- `/permissions` lists the rules; `/permissions allow <rule>` and `/permissions deny <rule>` add one to the project settings.
+
+### Changed
+- `edit_file` and `write_file` refuse to change an existing file that was not read in the session, or that changed since it was read (by a command, by you or by another process). The model is told to read it again; the check runs before the approval prompt, so you are not asked to approve an edit that would fail.
+
 ## 0.7.5 — 2026-10-30
 
 Brito now creates and edits skills on its own in "allow everything" mode.

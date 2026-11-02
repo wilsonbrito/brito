@@ -18,7 +18,7 @@ O Brito é um agente para desenvolvimento de software. Use no terminal (`brito-c
 - **Cobertura ampla.** TypeScript/JavaScript, Python e os blocos de script de componentes `.svelte`, `.vue` e `.astro`. Aliases de import (`paths` do tsconfig, `imports` do package.json, `$lib` do SvelteKit) viram arestas de verdade. O que o `.gitignore` ignora fica de fora.
 - **Skills que aprendem sozinhas, em período de teste.** Depois de uma tarefa em que algo tropeçou ou foi corrigido, o Brito reflete e cria uma skill *em teste* sem te interromper. A skill se prova pelo uso: 3 usos limpos a promovem, 2 tropeços a arquivam (recuperável). O que é arriscado, ou qualquer mudança numa skill que você aprovou, continua esperando o seu `/skills approve`. `BRITO_SKILLS=ask` volta a pedir aprovação para tudo; `off` desliga o aprendizado.
 - **Proteções sobre o que é aprendido.** Um lint rejeita segredos, credenciais embutidas em URL, `curl | sh` e frases de injeção de prompt, e **avisa sobre comandos destrutivos** (veja abaixo).
-- **Modos de permissão.** manual, auto-edições, plano e "tudo liberado" (`Shift+Tab` alterna). As skills autônomas não dependem do modo: nascem em teste e são julgadas pelo resultado.
+- **Modos e regras de permissão.** manual, auto-edições, plano e "tudo liberado" (`Shift+Tab` alterna), mais regras `allow`/`deny` por comando ou caminho (veja [Regras de permissão](#regras-de-permissão)). Editar um arquivo exige tê-lo lido na sessão, sem mudanças desde então. As skills autônomas não dependem do modo: nascem em teste e são julgadas pelo resultado.
 - **Dois backends, uma interface.** Use uma chave da API da Anthropic ou a sua assinatura do Claude Code pela CLI `claude`. O Brito nunca lê nem envia o token da sua assinatura.
 - **Terminal ou app de desktop.** `npm i -g brito-cli` instala o comando `brito`; o app de desktop é um executável nativo com janela (projetos e sessões numa barra lateral, chat, pedidos de permissão), sem precisar de Node nem de terminal. Veja [Instalação](#instalação).
 - **Imagens.** Arraste um arquivo de imagem para o prompt (ou cole o caminho) e ele é anexado ao turno: PNG, JPEG, GIF ou WebP, até 5 MB.
@@ -146,6 +146,7 @@ OK: 20 arquivos, 66 símbolos, 54 chamadas, 17 imports | +0 ~0 -0 =20 (28ms)
 | `/fallback` | mostra o modelo principal e o fallback (qwen), e se a troca já aconteceu |
 | `/modo` ou `Shift+Tab` | troca o modo de permissão: manual → auto-edições → plano → tudo liberado |
 | `/skills` | lista skills · `pending` · `approve <nome>` · `reject <nome>` · `consolidate` · `rm <nome>` · `promote <nome>` |
+| `/permissions` | lista as regras de permissão · `allow <regra>` · `deny <regra>` |
 | `/learn` | extrai skills do último turno agora |
 | `/agents`, `/tools`, `/index`, `/context` | inspecionam subagentes, tools, o índice e a janela de contexto |
 | `!comando` | roda um comando no shell direto, sem chamar o modelo |
@@ -158,6 +159,26 @@ OK: 20 arquivos, 66 símbolos, 54 chamadas, 17 imports | +0 ~0 -0 =20 (28ms)
 - **Imports:** relativos e por alias. Resolve `paths`/`baseUrl` do `tsconfig.json`/`jsconfig.json` (seguindo `extends` relativo, como o `.svelte-kit/tsconfig.json`), `imports` do `package.json` (`#interno/*`) e o `$lib` do SvelteKit. A configuração vale por arquivo (a mais próxima), então monorepos funcionam; editar um tsconfig reindexa os arquivos afetados.
 - **Linguagens de backend:** o grafo guarda classes/interfaces/structs/traits/enums/módulos, funções e métodos (`Classe.metodo`), chamadas e imports. Nelas o import nomeia um pacote, não um caminho; o Brito casa o especificador com o final do caminho dos seus arquivos (`com.acme.Repo` ↔ `src/main/java/com/acme/Repo.java`; namespaces PSR-4 do PHP; `use crate::…` do Rust; `require`/`require_relative` do Ruby; pacotes Go pelo módulo do `go.mod`). Pacote externo (`java.util`, `serde`, `github.com/gin-gonic/gin`) nunca casa e não gera aresta. Não há inferência de tipos: `userRepository.save()` é ligado casando o nome do receptor com um tipo do projeto (`UserRepository`), `this`/`self`/receiver resolvem para a classe que contém a chamada, e uma chamada solta dentro de classe tenta primeiro os métodos da própria classe.
 - **Ainda não:** `extends` por pacote (`@tsconfig/node20`), `exports` de workspaces vizinhos e referências de função sem chamada em um template (`onclick={fn}`). As chamadas são resolvidas estaticamente, com fallback por nome, então despacho dinâmico e reflexão não são capturados.
+
+## Regras de permissão
+
+Para não aprovar o mesmo comando toda vez (nem precisar do "tudo liberado"), declare regras em `.brito/settings.json` (do projeto, pode ir para o git), `.brito/settings.local.json` (só seu) ou `~/.brito/settings.json` (todos os projetos). As listas se somam.
+
+```json
+{
+  "permissions": {
+    "allow": ["bash(npm test:*)", "bash(npm run typecheck)", "bash(git status:*)", "edit_file(src/**)"],
+    "deny": ["bash(git push:*)", "bash(rm -rf*)", "read_file(.env*)"]
+  }
+}
+```
+
+- `tool` vale para qualquer uso; `tool(padrão)` restringe. Em `bash`, `*` casa qualquer coisa e `:*` no fim casa o prefixo sozinho ou com argumentos (`git status:*` libera `git status --short`, não `git statusx`). Em caminhos, `*` não cruza diretórios e `**` cruza.
+- **`allow` dispensa a pergunta** nos modos manual e auto-edições. O modo plano continua bloqueando.
+- **`deny` bloqueia sempre**, inclusive no "tudo liberado".
+- Um comando composto só é liberado se **cada pedaço** (`&&`, `||`, `;`, `|`) casar com uma regra: `bash(npm test*)` não libera `npm test && rm -rf ~`. Comandos com `$(...)`, crases ou redirecionamento para arquivo nunca são liberados por regra; `2>&1` e `> /dev/null` podem.
+- As regras valem também para o Bash, o Edit e o Write do `claude` CLI quando o Brito roda sobre a sua assinatura.
+- `/permissions` lista as regras; `/permissions allow bash(npm test:*)` grava no `.brito/settings.json`.
 
 ## Bancos de dados e outros recursos sensíveis
 
