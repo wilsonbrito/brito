@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Orchestrator mode (`/orquestrar on|off|modelo <profile>`): Claude plans (writing `spec/<feature>/spec.md` and `tasks.md` through the new `spec_save` tool and waiting for approval before delegating) and reviews, an endpoint profile (Qwen by default) implements each task through the new `implement` tool. The tool appends `git status`, `git diff --stat` and the output of the task's `verify` command. Works in API mode, in `claude` CLI mode (via the MCP server, with approvals in the terminal) and in the desktop app ("Implementa" picker). `BRITO_IMPL_MODEL` or `implModel` in the config pick the profile; `/orquestrar on --global` keeps the mode on across restarts (`orchestrator: true`).
+
 ## 0.7.5 — 2026-10-30
 
 Brito now creates and edits skills on its own in "allow everything" mode.

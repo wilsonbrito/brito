@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 const api = window.brito;
 
-let state = { projects: [], sessions: [], activeId: null, settings: { model: "", effort: "", mode: "manual" } };
+let state = { projects: [], sessions: [], activeId: null, settings: { model: "", effort: "", mode: "manual", orch: "" } };
 const rt = new Map(); // sessionId → { busy, backend: "off"|"starting"|"on", usage, approvals: [] }
 const openFolds = new Set();
 let filter = "";
@@ -132,7 +132,7 @@ function renderTop() {
   $("send").classList.toggle("stop", !!r?.busy);
   $("send").title = r?.busy ? "Interromper" : "Enviar (Enter)";
   const set = s?.settings ?? state.settings;
-  $("mode").value = set.mode; $("model").value = set.model; $("effort").value = set.effort;
+  $("mode").value = set.mode; $("model").value = set.model; $("effort").value = set.effort; $("orch").value = set.orch ?? "";
   const b = r?.backend ?? "off";
   $("st-backend").innerHTML = b === "on" ? `<span class="ok">●</span> Conectado · ${r?.engine === "api" ? "API" : "assinatura"}${r?.fallback ? ` · ${String(r.model).replace(/[<>&"]/g, "")} (fallback)` : ""}` : b === "starting" ? '<span class="bad">●</span> Iniciando backend…' : "○ Backend parado";
   $("st-dir").textContent = s ? projectOf(s)?.path ?? "" : "";
@@ -227,7 +227,7 @@ $("search").oninput = (e) => { filter = e.target.value; renderSidebar(); };
 $("allow").onclick = () => answer(true);
 $("deny").onclick = () => answer(false);
 document.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "n") { e.preventDefault(); newSession(); } });
-for (const k of ["mode", "model", "effort"]) {
+for (const k of ["mode", "model", "effort", "orch"]) {
   $(k).onchange = (e) => {
     const s = active();
     if (!s) return;

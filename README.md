@@ -220,6 +220,15 @@ With Claude as the main model (API or `claude` CLI), the `qwen` profile is the a
 - Without `ANTHROPIC_API_KEY` and without the `claude` CLI, Brito opens straight on Qwen, with a warning. If the fallback is not ready, the usual error includes why (e.g. `BRITO_QWEN_API_KEY` is missing). An invalid `qwen` profile is still an error, never a silent fallback.
 - `/fallback` shows the state. In the desktop app, send `/fallback` as a message; the status bar shows Qwen while the fallback is active.
 
+### Orchestrator mode: Claude plans, Qwen implements
+
+`/orquestrar on` keeps Claude as the main model but hands the implementation to an endpoint profile (`qwen` by default). Claude writes the spec and the task list to `spec/<feature>/spec.md` and `spec/<feature>/tasks.md` (`spec_save` tool), waits for your approval, and only then sends one task at a time to the `implement` tool, checking off in `tasks.md` the ones that pass its review. It loses its file-editing tools (`write_file`/`edit_file`, or `Edit`/`Write`/`MultiEdit`/`NotebookEdit` in `claude` CLI mode): its only write is `spec_save`, which can only write those two files. It keeps reading, the graph and `bash` to check the work.
+
+- The implementer runs in an isolated context (it does not see the conversation), with the graph of the symbols passed in `focus`. Its edits and commands follow the permission mode, and in `claude` CLI mode they are approved in the terminal just like Claude's.
+- When it finishes, the tool itself appends `git status --short`, `git diff --stat` and the output of the task's `verify` command, so Claude judges by what changed on disk, not by the implementer's report.
+- `/orquestrar` shows the state; `/orquestrar off` turns it off; `/orquestrar modelo <profile>` picks another implementer profile (also `BRITO_IMPL_MODEL` or `implModel` in the config). They combine: `/orquestrar on modelo qwen`. With `--global`, what you asked for is saved in the config: `/orquestrar on --global` turns the mode on every time Brito starts (`orchestrator: true`), and `/orquestrar off --global` undoes it. The status bar shows `⚙ →qwen` while it is on. In the desktop app, use the "Implementa" picker.
+- It only turns on with a valid profile, its key in the environment and a main model other than the implementer. If the main model becomes Qwen (fallback or `/model qwen`), the mode turns off with a warning.
+
 ## Configuration
 
 `BRITO_MODEL`, `BRITO_EFFORT`, `BRITO_EXPLORE_MODEL`, `BRITO_LEARN_MODEL`, `BRITO_HOME` (where global skills and history live), `BRITO_CONFIG`, `BRITO_COLOR`, `BRITO_BANNER` (`compact` or `full`; default: full screen on windows of 95+ columns and 28+ rows), `BRITO_INDEX_IGNORED`, `BRITO_SKILL_MIN_TOOLS` (how long a turn must be to trigger reflection when nothing else does), `BRITO_SKILLS` (`auto` default, `ask`, `off`), `BRITO_SHELL` (shell used by the `bash` tool; on Windows defaults to Git Bash when installed).

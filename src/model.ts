@@ -42,6 +42,23 @@ function saveConfig(patch: Record<string, unknown>): void {
 
 export const saveModel = (model: string) => saveConfig({ model });
 
+/** Perfil que implementa as tasks no modo orquestrador (`implModel` no config). */
+export function loadSavedImplModel(): string | undefined {
+  try {
+    const m = JSON.parse(readFileSync(configPath(), "utf8"))?.implModel;
+    return typeof m === "string" && m.trim() ? m.trim() : undefined;
+  } catch { return undefined; }
+}
+
+export const saveImplModel = (implModel: string) => saveConfig({ implModel });
+
+/** Modo orquestrador ligado ao abrir o Brito (`orchestrator: true` no config, gravado por `/orquestrar on --global`). */
+export function loadSavedOrch(): boolean {
+  try { return JSON.parse(readFileSync(configPath(), "utf8"))?.orchestrator === true; } catch { return false; }
+}
+
+export const saveOrch = (orchestrator: boolean) => saveConfig({ orchestrator });
+
 /**
  * Escada de esforço do Hermes (EFFORT_LADDER, do mais fraco ao mais forte). `none` desliga o raciocínio;
  * `minimal` e `ultra` são internos: o claude CLI não os aceita, então `clampEffort` os mapeia.

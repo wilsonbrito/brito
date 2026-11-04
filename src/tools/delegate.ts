@@ -1,19 +1,57 @@
 import { z } from "zod";
-import { defineTool, allTools, execTool } from "./registry.js";
+import { defineTool, allTools, execTool, type ToolContext } from "./registry.js";
 import { Agent } from "../agent/loop.js";
 import { getAgent, listAgents, type AgentDef } from "../agent/agents.js";
 import { buildSubagentPrompt } from "../agent/prompt.js";
 import { subagentModel } from "../engine.js";
 import { initialModel } from "../model.js";
 import { ui } from "../ui/ui.js";
+import type { TurnSink } from "../agent/sink.js";
 
 let seq = 0;
 
-/** Conjunto de tools de um agente; `delegate` nunca é repassada (sem recursão). */
+/** Conjunto de tools de um agente; `delegate` e `implement` nunca são repassadas (sem recursão), nem `spec_save` (a spec é do principal). */
 function toolSet(def: AgentDef): Set<string> {
   const names = def.tools === "all" ? allTools().map((t) => t.name) : def.tools;
   // Sem recursão e sem aprender: criar/alterar skills é papel do agente principal.
-  return new Set(names.filter((n) => !["delegate", "skill_save", "skill_delete", "exit_plan"].includes(n)));
+  return new Set(names.filter((n) => !["delegate", "implement", "spec_save", "skill_save", "skill_delete", "exit_plan"].includes(n)));
+}
+
+export interface SubagentOpts {
+  maxSteps?: number;
+  /** destino do progresso; padrão = terminal. No servidor MCP o stdout é o protocolo: nada pode ir para lá */
+  log?: (s: string) => void;
+  /** destino dos avisos do loop (limite de passos…); padrão = terminal */
+  sink?: TurnSink;
+}
+
+/**
+ * Roda um subagente em contexto isolado e devolve o texto final com o uso. O subgrafo dos símbolos de `focus` vai junto
+ * da tarefa: é a vantagem do grafo, o filho já começa sabendo onde está.
+ */
+export async function runSubagent(def: AgentDef, task: string, focus: string[], ctx: ToolContext, opts: SubagentOpts = {}) {
+  const label = `${def.name}#${++seq}`;
+  const log = opts.log ? (s: string) => opts.log!(`[${label}] ${s}`) : (s: string) => ui.sub(label, s);
+
+  let seed = "";
+  for (const sym of focus) {
+    const r = await execTool("graph_context", { symbol: sym }, ctx);
+    seed += `\n\n### graph_context(${sym})\n${r.text}`;
+  }
+
+  log(`iniciado: ${task.slice(0, 100).replace(/\s+/g, " ")}`);
+  const sub = new Agent(buildSubagentPrompt(ctx.root, def), ctx, {
+    model: subagentModel(def, ctx.model?.() ?? initialModel(), process.env),
+    maxSteps: opts.maxSteps ?? 25,
+    quiet: true,
+    tools: toolSet(def),
+    log,
+    sink: opts.sink,
+  });
+  const text = await sub.send(seed ? `${task}\n\n# Contexto do grafo (pré-carregado)${seed}` : task);
+  const tokens = Math.round((sub.usage.input + sub.usage.output) / 1000);
+  log(`concluído: ${sub.usage.steps} passos, ~${tokens}k tokens`);
+  return { label, text, steps: sub.usage.steps, tokens, model: sub.model };
 }
 
 /** Agente somente-leitura: nenhuma tool dele escreve arquivos ou exige aprovação. */
@@ -43,28 +81,7 @@ defineTool({
   async run({ agent, task, focus }, ctx) {
     const def = getAgent(agent);
     if (!def) throw new Error(`Agente desconhecido: ${agent}. Disponíveis: ${listAgents().map((a) => a.name).join(", ")}`);
-
-    const label = `${def.name}#${++seq}`;
-    const log = (s: string) => ui.sub(label, s);
-
-    // O subgrafo pré-carregado é a vantagem do grafo: o filho já começa sabendo onde está.
-    let seed = "";
-    for (const sym of focus) {
-      const r = await execTool("graph_context", { symbol: sym }, ctx);
-      seed += `\n\n### graph_context(${sym})\n${r.text}`;
-    }
-
-    log(`iniciado: ${task.slice(0, 100).replace(/\s+/g, " ")}`);
-    const sub = new Agent(buildSubagentPrompt(ctx.root, def), ctx, {
-      model: subagentModel(def, ctx.model?.() ?? initialModel(), process.env),
-      maxSteps: 25,
-      quiet: true,
-      tools: toolSet(def),
-      log,
-    });
-    const text = await sub.send(seed ? `${task}\n\n# Contexto do grafo (pré-carregado)${seed}` : task);
-    const tokens = Math.round((sub.usage.input + sub.usage.output) / 1000);
-    log(`concluído: ${sub.usage.steps} passos, ~${tokens}k tokens`);
-    return `[subagente ${label} · ${sub.usage.steps} passos · ~${tokens}k tokens]\n\n${text.slice(0, 12_000)}`;
+    const r = await runSubagent(def, task, focus, ctx);
+    return `[subagente ${r.label} · ${r.steps} passos · ~${r.tokens}k tokens]\n\n${r.text.slice(0, 12_000)}`;
   },
 });
