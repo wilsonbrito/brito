@@ -10,14 +10,15 @@ import type { ModelMessage, OutBlock, SendHooks } from "../provider/types.js";
 import { fallbackStatus } from "../engine.js";
 import { activateFallback, classifyAnthropicError, fallbackWarning, shortError, triggersFallback, type FallbackState } from "../provider/fallback.js";
 import { fmtBytes, findImages, imageBlock, splitOversize } from "../util/images.js";
+import { orchGuard } from "../orchestrator.js";
 
 export const MODEL = initialModel();
 
 export interface AgentOptions {
   model?: string;
   maxSteps?: number;
-  /** allowlist de tools; indefinido = todas */
-  tools?: Set<string>;
+  /** allowlist de tools; indefinido = todas. Função = relida a cada passo (o modo orquestrador muda no meio da sessão) */
+  tools?: Set<string> | (() => Set<string>);
   /** não imprime o texto em streaming (subagentes) */
   quiet?: boolean;
   log?: (s: string) => void;
@@ -127,7 +128,8 @@ export class Agent {
       const runOne = async (u: Extract<OutBlock, { type: "tool_use" }>): Promise<Anthropic.ToolResultBlockParam> => {
         const t0 = Date.now();
         if (!this.opts.quiet) this.ui.toolStart(u.id, u.name, u.input);
-        const denied = this.opts.tools && !this.opts.tools.has(u.name);
+        const allow = this.allowed();
+        const denied = allow && !allow.has(u.name);
         const r = denied ? { text: `Tool não permitida para este agente: ${u.name}`, isError: true } : await execTool(u.name, u.input, this.ctx);
         if (this.opts.quiet) this.log(terminalUi.toolLine(u.name, u.input, Date.now() - t0, r.isError));
         else this.ui.toolEnd(u.id, r.isError, r.text);
@@ -161,7 +163,7 @@ export class Agent {
           model: this.model,
           maxTokens: target.kind === "openai" && thinking ? 16_384 : 8192,
           system: typeof this.system === "function" ? this.system() : this.system,
-          tools: toApiTools(this.opts.tools),
+          tools: toApiTools(this.allowed()),
           messages: this.messages,
           thinking,
         },
@@ -178,9 +180,14 @@ export class Agent {
       this.ui.warn(fallbackWarning(kind, why, status.label));
       activateFallback(fb, `${kind} (${why})`);
       this.model = status.name;
+      orchGuard(this.model, (m) => this.ui.warn(m)); // o qwen virou o principal: não há mais a quem delegar
       await this.compactIfNeeded();
       return this.callModel(hooks);
     }
+  }
+
+  private allowed(): Set<string> | undefined {
+    return typeof this.opts.tools === "function" ? this.opts.tools() : this.opts.tools;
   }
 
   async compactIfNeeded() {

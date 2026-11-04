@@ -5,6 +5,12 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import "../tools/graph.js";
 import "../tools/skills.js";
+// O implementador do modo orquestrador roda aqui e edita/roda comandos; fs e bash só existem para ele (não são expostos).
+import "../tools/fs.js";
+import "../tools/bash.js";
+import { implementIo } from "../tools/implement.js";
+import "../tools/spec.js";
+import { ORCH_ONLY, orch } from "../orchestrator.js";
 import { allTools, execTool, type ToolContext } from "../tools/registry.js";
 import { GraphStore } from "../graph/store.js";
 import { INDEXED_EXTENSIONS, indexProject } from "../graph/indexer.js";
@@ -30,7 +36,7 @@ export const MCP_INSTRUCTIONS = [
  * tools de consulta, que são baratas e de uso frequente. As de escrita e a de aprovação (interna) continuam adiadas.
  */
 export const ALWAYS_LOAD_META = "anthropic/alwaysLoad";
-export const alwaysLoaded = (tool: string) => /^(graph_|recall$|remember$|skill_load$)/.test(tool);
+export const alwaysLoaded = (tool: string) => /^(graph_|recall$|remember$|skill_load$|implement$)/.test(tool);
 
 /** Prefixo com que o claude CLI enxerga as tools deste servidor. */
 export const MCP_PREFIX = `mcp__${MCP_NAME}__`;
@@ -38,7 +44,11 @@ export const MCP_PREFIX = `mcp__${MCP_NAME}__`;
 export const APPROVE_TOOL = "approve";
 
 // fs/bash/delegate o próprio claude já tem (Read/Edit/Bash/Task); aqui vai só o que é do Brito.
-const exposed = () => allTools().filter((t) => /^(graph_|skill_)/.test(t.name) || t.name === "remember" || t.name === "recall");
+/** Tools que o claude enxerga; `implement` e `spec_save` só com o modo orquestrador ligado (BRITO_ORCH=1). */
+export const exposed = () => allTools().filter((t) => /^(graph_|skill_)/.test(t.name) || t.name === "remember" || t.name === "recall" || (ORCH_ONLY.includes(t.name) && orch.on));
+
+/** Nome do pedido de aprovação de uma ação do implementador (o terminal mostra só a pergunta). */
+export const IMPL_ASK = "BritoImplementer";
 
 /** Pergunta ao REPL (socket unix) se o claude pode usar a tool; sem socket, nega. */
 function askRepl(toolName: string, input: unknown): Promise<{ allow: boolean; message?: string }> {
@@ -79,7 +89,26 @@ export async function serveMcp(root: string): Promise<void> {
       ...(alwaysLoaded(t.name) ? { _meta: { [ALWAYS_LOAD_META]: true } } : {}),
     }))],
   }));
-  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+  /**
+   * O claude aprovou a chamada de `implement`, não cada edição dentro dela: as do implementador pedem aprovação ao
+   * terminal pelo mesmo socket, conforme o modo. O progresso vai como notificação MCP (o stdout daqui é o protocolo).
+   */
+  const runImplement = async (args: unknown, extra: { sendNotification: (n: any) => Promise<void> }, token?: string | number) => {
+    let step = 0;
+    implementIo.log = (msg) => {
+      if (token === undefined) { process.stderr.write(msg + "\n"); return; }
+      extra.sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: ++step, message: msg } }).catch(() => {});
+    };
+    const warn = (msg: string) => implementIo.log!(msg);
+    implementIo.sink = { turnStart() {}, turnEnd() {}, text() {}, textEnd() {}, thinking() {}, toolStart() {}, toolEnd() {}, info: warn, warn, error: warn };
+    // Quem chama este servidor é sempre o claude CLI: o principal é um Claude, não o modelo salvo no config.
+    const implCtx: ToolContext = { ...ctx, ask: async (q) => (await askRepl(IMPL_ASK, { question: q })).allow, model: () => "claude" };
+    const r = await execTool("implement", args, implCtx);
+    ctx.dirty = true; // o implementador editou arquivos: a próxima consulta ao grafo reindexa
+    return r.isError ? `[ERRO] ${r.text}` : r.text;
+  };
+
+  server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     if (req.params.name === APPROVE_TOOL) {
       const a = (req.params.arguments ?? {}) as { tool_name?: string; input?: Record<string, unknown> };
       const r = await askRepl(String(a.tool_name ?? "?"), a.input ?? {});
@@ -89,6 +118,7 @@ export async function serveMcp(root: string): Promise<void> {
     if (!exposed().some((t) => t.name === req.params.name)) {
       return { content: [{ type: "text", text: `Tool desconhecida: ${req.params.name}` }], isError: true };
     }
+    if (req.params.name === "implement") return { content: [{ type: "text", text: await runImplement(req.params.arguments ?? {}, extra, req.params._meta?.progressToken) }] };
     const r = await execTool(req.params.name, req.params.arguments ?? {}, ctx);
     return { content: [{ type: "text", text: r.text }], isError: r.isError };
   });

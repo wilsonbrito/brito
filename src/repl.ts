@@ -15,6 +15,7 @@ const userName = () => {
 import { listPending, listSkills, deleteSkill, promoteSkill, globalHome } from "./skills/store.js";
 import { listAgents } from "./agent/agents.js";
 import { perms, cycleMode, MODE_LABEL, type PermMode } from "./permissions.js";
+import { orch } from "./orchestrator.js";
 
 /** O que o REPL precisa de um backend (API direta ou claude CLI). */
 export interface ReplBackend {
@@ -113,7 +114,10 @@ export async function runRepl(b: ReplBackend, o: ReplOpts) {
   ].sort((x, y) => x.name.localeCompare(y.name));
 
   const modeColor: Record<PermMode, (t: string) => string> = { manual: c.muted, auto: c.ok, plan: c.warn, bypass: c.err };
-  const modeChip = () => { const m = MODE_LABEL[perms.mode]; return modeColor[perms.mode](`${m.icon} ${m.name}`); };
+  const modeChip = () => {
+    const m = MODE_LABEL[perms.mode];
+    return modeColor[perms.mode](`${m.icon} ${m.name}`) + (orch.on ? c.ok(` ⚙ →${orch.model}`) : "");
+  };
   const status = () => ui.statusLine({
     project: path.basename(o.root),
     mode: modeChip(),
