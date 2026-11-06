@@ -31,9 +31,17 @@ defineTool({
     if (!orch.on) return "O modo orquestrador está desligado; spec_save só existe nele.";
     const rel = `${SPEC_DIR}/${feature}/${file}`;
     const full = path.join(root, SPEC_DIR, feature, file);
-    const existed = fs.existsSync(full);
+    const data = content.endsWith("\n") ? content : content + "\n";
     fs.mkdirSync(path.dirname(full), { recursive: true });
-    fs.writeFileSync(full, content.endsWith("\n") ? content : content + "\n");
+    // Cria com "wx" (falha se já existir) em vez de existsSync + write: checagem e escrita numa operação só, sem TOCTOU.
+    let existed = false;
+    try {
+      fs.writeFileSync(full, data, { flag: "wx" });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      existed = true;
+      fs.writeFileSync(full, data);
+    }
     return `${existed ? "Atualizado" : "Criado"} ${rel}`;
   },
 });
