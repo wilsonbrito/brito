@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import Anthropic from "@anthropic-ai/sdk";
 import fs from "node:fs";
 import path from "node:path";
-import { activateFallback, chooseModel, classifyAnthropicError, classifyClaudeCliFailure, cliShouldFallBack, collectClaudeFailure, fallbackWarning, newFallbackState, type ClaudeCliFailure, onceRestore, renderFallback, RESUMED_NOTE, RETRY_NOTE, retryPrompt, shortError, triggersFallback } from "../src/provider/fallback.js";
+process.env.BRITO_SLM_FALLBACK = "off"; // hermético: o SLM baixado na máquina não entra na cadeia
+import { activateFallback, chooseModel, fallbackExpired, fallbackUntil, returnToPrimary, classifyAnthropicError, classifyClaudeCliFailure, cliShouldFallBack, collectClaudeFailure, fallbackWarning, newFallbackState, type ClaudeCliFailure, onceRestore, renderFallback, RESUMED_NOTE, RETRY_NOTE, retryPrompt, shortError, triggersFallback } from "../src/provider/fallback.js";
 
 test("estado novo: principal = modelo inicial, inativo", () => {
   assert.deepEqual(newFallbackState("claude-opus-5-5"), { primary: "claude-opus-5-5", active: false });
@@ -200,4 +201,35 @@ test("pedido refeito no qwen vem com a nota; aviso da troca é o mesmo nos dois 
   assert.equal(retryPrompt("rode os testes", true), `${RETRY_NOTE}\n${RESUMED_NOTE}\n\nrode os testes`);
   assert.match(RETRY_NOTE, /sem refazer ações já concluídas/);
   assert.equal(fallbackWarning("quota", "5-hour limit reached", "Qwen 27B"), "⚠ Claude falhou (quota: 5-hour limit reached) — seguindo com Qwen 27B. /fallback para detalhes, /model <claude> para voltar.");
+});
+
+test("fallbackUntil: janela por tipo de falha, BRITO_FALLBACK_MINUTES e horário de reset do erro", () => {
+  const now = new Date(2026, 10, 7, 10, 0, 0).getTime();
+  assert.equal(fallbackUntil("rate_limit", "429", {}, now), now + 10 * 60_000);
+  assert.equal(fallbackUntil("quota", "limit", {}, now), now + 60 * 60_000);
+  assert.equal(fallbackUntil("quota", "limit", { BRITO_FALLBACK_MINUTES: "5" }, now), now + 5 * 60_000);
+  assert.equal(fallbackUntil("quota", "usage limit reached · resets 3pm", {}, now), new Date(2026, 10, 7, 15, 1, 0).getTime());
+  assert.equal(fallbackUntil("quota", "resets at 23:30", {}, now), now + 60 * 60_000); // mais de 12h à frente: ignora
+});
+
+test("fallbackExpired / returnToPrimary", () => {
+  const s = newFallbackState("sonnet");
+  assert.equal(fallbackExpired(s, 10), false);
+  activateFallback(s, "x", 1, 100, "slm");
+  assert.equal(fallbackExpired(s, 99), false);
+  assert.equal(fallbackExpired(s, 100), true);
+  chooseModel(s, "sonnet");
+  activateFallback(s, "sem janela", 1); // sem `until`: vale até o /model
+  assert.equal(fallbackExpired(s, 1e12), false);
+  activateFallback(s, "y", 1, 5, "qwen");
+  returnToPrimary(s);
+  assert.deepEqual([s.active, s.until, s.using], [false, undefined, undefined]);
+});
+
+test("/fallback com SLM em uso mostra o horário de retorno", () => {
+  const s = newFallbackState("sonnet");
+  activateFallback(s, "quota (limit)", new Date(2026, 10, 7, 10, 0).getTime(), new Date(2026, 10, 7, 11, 0).getTime(), "slm");
+  const out = renderFallback(s, "slm", "API Anthropic", { ready: true, name: "slm", label: "SLM local" }).join(" | ");
+  assert.match(out, /SLM local .* em uso/);
+  assert.match(out, /\(SLM local\) — Claude falhou: quota \(limit\) — o Claude é tentado de novo às 11:00/);
 });

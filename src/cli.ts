@@ -18,7 +18,7 @@ import { indexProject } from "./graph/indexer.js";
 import { Agent } from "./agent/loop.js";
 import { EFFORTS, MODEL_ALIASES, modelHelp, effortLabel, initialEffort, initialModel, loadProfiles, isEffort, loadReasoningDisplay, parseModelArgs, saveEffort, saveModel, saveReasoningDisplay, type Effort, type ModelScope } from "./model.js";
 import { hasClaudeCli, historyForFallback, ClaudeSession } from "./agent/claude-cli.js";
-import { FALLBACK_PROFILE, NO_ANTHROPIC, fallbackStatus, learnerModel, openEngine } from "./engine.js";
+import { NO_ANTHROPIC, fallbackStatus, learnerModel, openEngine } from "./engine.js";
 import { activateFallback, chooseModel, cliShouldFallBack, fallbackWarning, newFallbackState, onceRestore, renderFallback, retryPrompt, type FallbackState } from "./provider/fallback.js";
 import { compactAtFor, contextWindowFor, resolveModel } from "./provider/resolve.js";
 import { startApprovalServer } from "./agent/approval.js";
@@ -630,7 +630,7 @@ async function buildClaudeBackend(root: string, io: Io, sw: () => SwitchableBack
     ui.warn(fallbackWarning(f.kind, f.message, status.label));
     const api = await openApi(status.name, status.label, { engineLabel: () => "claude CLI · assinatura" });
     if (!api) return null;
-    activateFallback(fallback, `${f.kind} (${f.message})`);
+    activateFallback(fallback, `${f.kind} (${f.message})`, Date.now(), undefined, status.name);
     return { api, retry: () => api.backend.turn(retryPrompt(text), signal) };
   };
 
@@ -776,7 +776,7 @@ program
     if (engine.kind === "fallback") {
       ui.warn(`⚠ ${NO_ANTHROPIC} (sem ANTHROPIC_API_KEY e sem o claude CLI) — abrindo no ${engine.label}. /fallback para detalhes.`);
       const fallback = newFallbackState(startModel);
-      activateFallback(fallback, NO_ANTHROPIC);
+      activateFallback(fallback, NO_ANTHROPIC, Date.now(), undefined, engine.name);
       opening = { ...opening, fallback, engineLabel: () => NO_ANTHROPIC };
     }
     let sw!: SwitchableBackend;
@@ -797,7 +797,7 @@ program
       await claude.modelCmd.cmd.run([m, `--${scope}`]);
       return true;
     };
-    const api = await buildApiBackend(root, engine.kind === "fallback" ? FALLBACK_PROFILE : startModel, io, opening);
+    const api = await buildApiBackend(root, engine.kind === "fallback" ? engine.name : startModel, io, opening);
 
     if (promptParts.length) {
       if (await api.backend.turn(promptParts.join(" "), new AbortController().signal)) await api.learn();

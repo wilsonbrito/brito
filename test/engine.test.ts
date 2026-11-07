@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fallbackStatus, learnerModel, openEngine, pickEngine, subagentModel } from "../src/engine.js";
+import { learnerModel, pickEngine, subagentModel, fallbackStatus as fallbackStatusRaw, openEngine as openEngineRaw } from "../src/engine.js";
+// Hermético: com o modelo do SLM baixado na máquina, ele viraria o fallback e mudaria os resultados.
+const NO_SLM = { BRITO_SLM_FALLBACK: "off" };
+const fallbackStatus = (p: string, env: NodeJS.ProcessEnv, skip?: string[]) => fallbackStatusRaw(p, { ...env, ...NO_SLM }, skip);
+const openEngine = (m: string, env: NodeJS.ProcessEnv, cli: () => boolean) => openEngineRaw(m, { ...env, ...NO_SLM }, cli);
 
 before(() => {
   process.env.BRITO_CONFIG = join(mkdtempSync(join(tmpdir(), "brito-")), "c.json");
@@ -104,7 +108,7 @@ test("fallbackStatus: principal já é o qwen (sem diferenciar maiúsculas)", ()
 });
 
 test("openEngine: Claude sem conta e fallback pronto → abre no qwen", () => {
-  assert.deepEqual(openEngine("sonnet", { BRITO_TESTE_KEY: "k" }, () => false), { kind: "fallback", label: "qwen" });
+  assert.deepEqual(openEngine("sonnet", { BRITO_TESTE_KEY: "k" }, () => false), { kind: "fallback", label: "qwen", name: "qwen" });
 });
 
 test("openEngine: com conta da Anthropic segue o pickEngine", () => {

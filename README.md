@@ -80,6 +80,8 @@ The lint **rejects** secrets/tokens, absolute user paths, credentials in URLs (`
 - **Skill learning**: the reflection runs locally with grammar-constrained JSON and falls back to the usual model on any failure.
 - **`digest` tool**: a scout and refiner for long texts. The local model picks the blocks most related to your objective and proposes excerpts; code then checks every quote against the source and drops what is not there, so the main model gets a small markdown draft with verified quotes and page numbers.
 
+- **Fallback when Claude runs out**: chain Claude → `qwen` profile → local SLM, with the full agent loop and tools (same permissions). It is temporary: after a window (the reset time reported by the error, else 10 min, or 60 min for quota/auth; `BRITO_FALLBACK_MINUTES` overrides) the next turn tries Claude again. `/fallback` shows when. A 4B model errs more with tools: use it to keep going, not for big tasks. `BRITO_SLM_FALLBACK=off` removes it from the chain; `BRITO_SLM_CTX` sets its context.
+
 `BRITO_SLM=off` disables it; `BRITO_SLM_MODEL` points to another GGUF (`hf:` URI or file path).
 
 ## Install

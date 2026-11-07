@@ -21,7 +21,7 @@ import type { TurnSink } from "../agent/sink.js";
 import { openGraphAfterClaude } from "../graph/store.js";
 import { indexProject } from "../graph/indexer.js";
 import { initialEffort, initialModel, isEffort, loadProfiles, MODEL_ALIASES, type Effort } from "../model.js";
-import { FALLBACK_PROFILE, NO_ANTHROPIC, fallbackStatus, openEngine } from "../engine.js";
+import { NO_ANTHROPIC, fallbackStatus, openEngine } from "../engine.js";
 import { activateFallback, chooseModel, cliShouldFallBack, fallbackWarning, newFallbackState, renderFallback, retryPrompt, type FallbackState } from "../provider/fallback.js";
 import { contextWindowFor, resolveModel } from "../provider/resolve.js";
 import type { Msg } from "../provider/types.js";
@@ -194,8 +194,8 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
       // Claude sem conta nenhuma, com o fallback pronto: a sessão já nasce no qwen (com aviso, nunca em silêncio).
       emit({ t: "warn", msg: `⚠ ${NO_ANTHROPIC} (sem ANTHROPIC_API_KEY e sem o claude CLI) — abrindo no ${opening.label}. Envie /fallback para detalhes.` });
       const fallback = newFallbackState(startModel);
-      activateFallback(fallback, NO_ANTHROPIC);
-      engine = await buildApiEngine(FALLBACK_PROFILE, { fallback, engineLabel: () => NO_ANTHROPIC, session });
+      activateFallback(fallback, NO_ANTHROPIC, Date.now(), undefined, opening.name);
+      engine = await buildApiEngine(opening.name, { fallback, engineLabel: () => NO_ANTHROPIC, session });
     } else engine = await buildApiEngine(startModel, { session });
   } else {
     const approval = startApprovalServer({ ask }, root);
@@ -248,7 +248,7 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
             },
           });
         } catch (e: any) { sink.error(`não consegui abrir o ${status.label}: ${e?.message ?? e}`); return; }
-        activateFallback(fallback, `${f.kind} (${f.message})`);
+        activateFallback(fallback, `${f.kind} (${f.message})`, Date.now(), undefined, status.name);
         engine = api;
         ready();
         await api.send(retryPrompt(text, resumed));

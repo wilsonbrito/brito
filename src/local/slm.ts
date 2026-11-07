@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import type Anthropic from "@anthropic-ai/sdk";
 import { globalHome } from "../skills/store.js";
@@ -111,6 +112,55 @@ export async function slmGenerate(o: GenerateOptions): Promise<string> {
     await context.dispose();
     scheduleUnload();
   }
+}
+
+// ------------------------------------------------------------------ chat com tools (fallback do Claude)
+
+/** Contexto do chat do SLM (BRITO_SLM_CTX; o padrão cabe numa GPU/RAM modesta). */
+export const slmChatCtx = () => { const n = Number(process.env.BRITO_SLM_CTX); return n >= 2048 ? Math.floor(n) : 16_384; };
+
+export interface ChatCall { name: string; input: unknown }
+export interface ChatOptions {
+  /** histórico no formato do `LlamaChat` (system + user/model) */
+  history: unknown[];
+  /** tools no formato `{ nome: { description, params } }`; o SLM só PEDE a chamada, quem executa é o loop do Brito */
+  functions?: Record<string, { description?: string; params?: object }>;
+  maxTokens?: number;
+  temperature?: number;
+  signal?: AbortSignal;
+  onText?: (t: string) => void;
+}
+export interface ChatResult { text: string; calls: ChatCall[]; truncated: boolean }
+
+/** Um passo de chat: devolve o texto e as chamadas de tool pedidas (sem executá-las). */
+export async function slmChat(o: ChatOptions): Promise<ChatResult> {
+  const lib = await loadLib();
+  const { model } = await ensureLoaded();
+  const context = await model.createContext({ contextSize: { max: slmChatCtx() } });
+  try {
+    const chat = new lib.LlamaChat({ contextSequence: context.getSequence() });
+    const functions = o.functions && Object.keys(o.functions).length
+      ? Object.fromEntries(Object.entries(o.functions).map(([name, f]) => [name, lib.defineChatSessionFunction({ description: f.description, params: f.params, handler: () => "" })]))
+      : undefined;
+    const res = await chat.generateResponse(o.history, {
+      functions, maxTokens: o.maxTokens ?? 2048, temperature: o.temperature ?? 0.3, signal: o.signal,
+      onTextChunk: (t: string) => { if (t) o.onText?.(t); },
+    });
+    const calls: ChatCall[] = (res.functionCalls ?? []).map((c: any) => ({ name: String(c.functionName), input: c.params ?? {} }));
+    return { text: String(res.response ?? ""), calls, truncated: res.metadata?.stopReason === "maxTokens" };
+  } finally {
+    await context.dispose();
+    scheduleUnload();
+  }
+}
+
+/** Versão síncrona de `slmStatus().ready` (o `fallbackStatus` é síncrono): biblioteca resolvível e um .gguf baixado. */
+export function slmReadySync(): boolean {
+  if (slmDisabled()) return false;
+  try { createRequire(import.meta.url).resolve(LIB); } catch { return false; }
+  const uri = slmUri();
+  if (!uri.startsWith("hf:") && !/^https?:/.test(uri)) return fs.existsSync(uri);
+  try { return fs.readdirSync(slmDir()).some((f) => f.endsWith(".gguf")); } catch { return false; }
 }
 
 // ------------------------------------------------------------------ reflexão

@@ -8,7 +8,7 @@ import { providerFor } from "../provider/index.js";
 import { compactAtFor, resolveModel } from "../provider/resolve.js";
 import type { ModelMessage, OutBlock, SendHooks } from "../provider/types.js";
 import { fallbackStatus } from "../engine.js";
-import { activateFallback, classifyAnthropicError, fallbackWarning, shortError, triggersFallback, type FallbackState } from "../provider/fallback.js";
+import { activateFallback, classifyAnthropicError, fallbackExpired, fallbackUntil, fallbackWarning, returnToPrimary, shortError, triggersFallback, type FallbackState } from "../provider/fallback.js";
 import { fmtBytes, findImages, imageBlock, splitOversize } from "../util/images.js";
 
 export const MODEL = initialModel();
@@ -96,6 +96,7 @@ export class Agent {
       this.messages.push({ role: "user", content: [...ok.map(imageBlock), { type: "text", text: userText }] });
       turn.messages.push({ role: "user", content: userText });
     } else push({ role: "user", content: userText });
+    this.retryPrimaryIfExpired();
     await this.compactIfNeeded();
     let finalText = "";
 
@@ -172,18 +173,35 @@ export class Agent {
       );
     } catch (e) {
       const fb = this.opts.fallback;
-      if (!fb || fb.active || hooks.signal?.aborted || target.kind !== "anthropic") throw e;
-      const kind = classifyAnthropicError(e);
+      if (!fb || hooks.signal?.aborted) throw e;
+      // Claude → qwen → SLM: com o fallback ativo só desce um degrau (qwen que falha cai no SLM), nunca o SLM.
+      const onQwen = fb.active && target.kind === "openai" && !target.local && target.name === "qwen";
+      if (fb.active ? !onQwen : target.kind !== "anthropic" || target.local) throw e;
+      if (onQwen && target.kind !== "openai") throw e;
+      const kind = onQwen ? "network" as const : classifyAnthropicError(e);
       if (!triggersFallback(kind)) throw e;
-      const status = fallbackStatus(this.model, process.env);
+      const status = fallbackStatus(fb.primary, process.env, onQwen ? ["qwen"] : []);
       if (!status.ready) throw e;
       const why = shortError(e);
-      this.ui.warn(fallbackWarning(kind, why, status.label));
-      activateFallback(fb, `${kind} (${why})`);
+      const until = onQwen ? fb.until : fallbackUntil(kind, why);
+      this.ui.warn(fallbackWarning(kind, why, status.label, until));
+      activateFallback(fb, `${kind} (${why})`, Date.now(), until, status.name);
       this.model = status.name;
       await this.compactIfNeeded();
       return this.callModel(hooks);
     }
+  }
+
+  /**
+   * Fallback temporário: passada a janela, o próximo turno tenta o Claude de novo (se falhar, `callModel` reativa o
+   * fallback com uma janela nova). Só com ANTHROPIC_API_KEY: sem ela o Claude não roda neste loop (volta via /model).
+   */
+  private retryPrimaryIfExpired() {
+    const fb = this.opts.fallback;
+    if (!fb || !fallbackExpired(fb) || !process.env.ANTHROPIC_API_KEY?.trim() || resolveModel(fb.primary).kind !== "anthropic") return;
+    returnToPrimary(fb);
+    this.model = fb.primary;
+    this.ui.info(`voltando ao Claude (${fb.primary}) para testar se o limite acabou`);
   }
 
   async compactIfNeeded() {

@@ -1,5 +1,12 @@
 import { MODEL_ALIASES, loadProfiles } from "../model.js";
-import type { ResolvedModel } from "./types.js";
+import type { OpenAIProfile, ResolvedModel } from "./types.js";
+
+/** Nome do SLM local como modelo (fallback do Claude e `/model slm`). Um perfil `slm` no config tem precedência. */
+export const SLM_MODEL = "slm";
+const SLM_PROFILE: OpenAIProfile = {
+  name: SLM_MODEL, type: "openai", label: "SLM local", baseURL: "local:", model: SLM_MODEL, apiKeyEnv: "",
+  contextWindow: 16_384, vision: false, thinkingToggle: false,
+};
 
 /** Janela dos modelos Claude quando nada informa outra. */
 const CLAUDE_WINDOW = 200_000;
@@ -9,6 +16,7 @@ const COMPACT_DEFAULT = 120_000;
 export function resolveModel(name: string): ResolvedModel {
   const key = name.trim().toLowerCase();
   const profile = loadProfiles().profiles[key];
+  if (!profile && key === SLM_MODEL) return { kind: "openai", name: SLM_MODEL, wireModel: SLM_MODEL, label: SLM_PROFILE.label, contextWindow: SLM_PROFILE.contextWindow, profile: SLM_PROFILE, local: true };
   if (profile) return { kind: "openai", name: key, wireModel: profile.model, label: profile.label, contextWindow: profile.contextWindow, profile };
   const wire = MODEL_ALIASES[key] ?? name.trim();
   return { kind: "anthropic", name: wire, wireModel: wire, label: wire, contextWindow: CLAUDE_WINDOW };

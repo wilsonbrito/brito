@@ -12,6 +12,7 @@ import { setProviderFactory } from "../src/provider/index.js";
 import { activateFallback, newFallbackState } from "../src/provider/fallback.js";
 import type { ModelMessage, ModelProvider, ModelRequest, SendHooks } from "../src/provider/types.js";
 import type { TurnSink } from "../src/agent/sink.js";
+process.env.BRITO_SLM_FALLBACK = "off"; // hermético: o SLM baixado na máquina não entra na cadeia
 import { sandbox } from "./helpers.js";
 
 /** Provedor falso: devolve as respostas na ordem e grava cada requisição. */
@@ -198,7 +199,7 @@ test("fallback: 429 no Claude repete o mesmo passo no qwen com o histórico idê
   assert.equal(fallback.active, true);
   assert.equal(fallback.primary, "sonnet");
   assert.match(fallback.reason!, /^rate_limit \(429/);
-  assert.ok(log.some((l) => /Claude falhou \(rate_limit: .*\) — seguindo com Qwen\. \/fallback para detalhes/.test(l)), log.join(" | "));
+  assert.ok(log.some((l) => /Claude falhou \(rate_limit: .*\) — seguindo com Qwen; tento o Claude de novo às \d\d:\d\d\. \/fallback para detalhes/.test(l)), log.join(" | "));
   sb.cleanup();
 });
 
@@ -261,5 +262,38 @@ test("fallback: sem estado (subagente) a falha é erro normal", async () => {
   const agent = new Agent("SYS", sb.ctx, { model: "sonnet", sink: silentSink() });
   await assert.rejects(agent.send("x"));
   assert.equal(agent.model, "sonnet");
+  sb.cleanup();
+});
+
+test("fallback temporário: passada a janela o próximo turno tenta o Claude de novo", async () => {
+  const sb = sandbox();
+  const key = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = "k";
+  try {
+    const reqs = claudeEQwen([apiErr(429, "rate_limit_error", "Too Many Requests"), text("de volta no claude")], [text("no qwen")]);
+    const { agent, fallback } = comFallback(sb);
+    assert.equal(await agent.send("um"), "no qwen");
+    assert.equal(fallback.active, true);
+    assert.equal(fallback.using, "qwen");
+    assert.ok(fallback.until! > Date.now());
+    fallback.until = Date.now() - 1; // a janela acabou
+    assert.equal(await agent.send("dois"), "de volta no claude");
+    assert.equal(fallback.active, false);
+    assert.equal(agent.model, "sonnet");
+    assert.equal(reqs.at(-1)!.kind, "anthropic");
+  } finally {
+    if (key === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = key;
+    sb.cleanup();
+  }
+});
+
+test("fallback temporário: dentro da janela segue no fallback sem chamar o Claude", async () => {
+  const sb = sandbox();
+  const reqs = claudeEQwen([apiErr(429, "rate_limit_error", "Too Many Requests")], [text("um"), text("dois")]);
+  const { agent, fallback } = comFallback(sb);
+  await agent.send("a");
+  await agent.send("b");
+  assert.equal(fallback.active, true);
+  assert.deepEqual(reqs.map((r) => r.kind), ["anthropic", "openai", "openai"]);
   sb.cleanup();
 });

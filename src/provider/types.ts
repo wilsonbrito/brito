@@ -67,4 +67,6 @@ export interface ResolvedModel {
   label: string;
   contextWindow: number;
   profile?: OpenAIProfile;
+  /** modelo local embutido (SLM): roda no processo, sem endpoint nem chave */
+  local?: boolean;
 }
