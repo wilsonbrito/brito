@@ -5,6 +5,16 @@
 Cheaper and smarter turns with an Anthropic API key. Permission rules, and no more edits made from memory. Resume where you left off, and a visible task list.
 
 ### Added
+- `digest` tool: "scout and refiner" for long texts. The local SLM walks a big file (the blocks most related to your objective), proposes excerpts and groups them into an outline; code then checks every quote against the source (OCR spacing and hyphenation are tolerated) and drops what is not there, so the main model receives a small markdown draft with verified quotes and page numbers. Needs `brito slm pull`. On a 757 KB book it analyzed 8 of 220 blocks in ~40 s and produced a 4 KB draft (12 of 17 proposed quotes verified). Cover, flap blurbs, table of contents and copyright pages of long page-marked books are skipped automatically.
+
+- Embedded local SLM (llama.cpp through the optional `node-llama-cpp` dependency, default Qwen3-4B-Instruct-2507 Q4_K_M, Apache-2.0). `brito slm` shows status, `brito slm pull` downloads the model to `~/.brito/models` (explicit and resumable), `brito slm rm` deletes it. Once downloaded, the skill-learning reflection runs locally with grammar-constrained JSON output and falls back to the usual model on any failure. `BRITO_SLM=off` disables it; `BRITO_SLM_MODEL` points to another GGUF (`hf:` URI or file path).
+
+- Built-in manual skills, run with `/grill-me`, `/grill-with-docs`, `/wayfinder` and `/grill-diff` (Tab completes them; `--um` asks one question per message). `grill-me` interviews you in rounds until the idea is firm, using the graph to avoid asking what the code already answers; `grill-with-docs` also saves each decision with `remember`; `wayfinder` maps big work into parts and delegates; `grill-diff` questions the current diff using `graph_impact`. A skill with the same name in `.brito/skills` overrides the built-in.
+- Skill frontmatter `invoke: manual` (only runs via `/name`, kept out of the prompt index) and `model:` (recommended model, shown by `skill_load` and `/skills`). Both are accepted by `skill_save`.
+- `/skills suggest <task>` ranks skills (built-ins included) by relevance; `skill_load` with an unknown name returns similar skills.
+- Skills remember what went wrong on their last failed turn (`lastLoss`), shown in `/skills`, `skill_load` and the learning step.
+- Quality hints when saving a skill: body over 3000 chars (split it) or no verification/exit criterion.
+
 - Permission rules in `.brito/settings.json`, `.brito/settings.local.json` or `~/.brito/settings.json`: `allow` skips the prompt for matching commands or paths (e.g. `bash(npm test:*)`, `edit_file(src/**)`), `deny` blocks them in every mode, including "everything allowed". A compound command is allowed only if every piece matches, and commands with `$(...)`, backticks or file redirection are never allowed by a rule. The rules also apply to the `claude` CLI's Bash, Edit and Write.
 - `/permissions` lists the rules; `/permissions allow <rule>` and `/permissions deny <rule>` add one to the project settings.
 - Sessions are saved per project in `.brito/sessions/` (git-ignored). `brito -c` resumes the most recent one and `brito --resume <id>` a specific one (the first characters of the id are enough); `brito sessions` and `/sessions` list them. In API mode Brito keeps the whole history; in `claude` CLI mode it keeps the session id and resumes through the CLI. A session reopens in the engine that recorded it. Attached images are not written to disk.
@@ -12,6 +22,7 @@ Cheaper and smarter turns with an Anthropic API key. Permission rules, and no mo
 - `todo_write` tool: on multi-step tasks the agent keeps a task list, shown under the tool line in the terminal, in the desktop app and with `/todos`. It is saved with the session. Subagents cannot change it.
 
 ### Changed
+- The skill index in the system prompt lists the 25 top-ranked skills (was 40) and says how many were left out.
 - The conversation is now prompt-cached, not only the system prompt. Each step of a multi-tool turn reads the earlier history from cache instead of paying for it again.
 - The system prompt stays byte-identical during a session. It is rebuilt only when plan mode toggles, the graph stops being empty or the set of skills changes, so a graph sync or a skill being used no longer invalidates the cache.
 - `/reasoning` now applies to the Anthropic API (it used to affect only the `claude` CLI and OpenAI-compatible endpoints): the level is sent as `output_config.effort`. `none` turns thinking off where the model allows it (`between_tools` on Sonnet 5.5) and becomes effort `low` on models whose thinking cannot be disabled (Opus 5.5, Fable).

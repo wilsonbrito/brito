@@ -100,7 +100,7 @@ export function recordOutcomes(turn: TurnRecord | null, ctx: ToolContext): strin
   if (!turn || skillsMode() === "off") return [];
   const verdict = judgeTurn(turn);
   if (!verdict) return [];
-  return [...(ctx.loadedSkills ?? [])].flatMap((n) => recordOutcome(ctx.root, n, verdict === "win") ?? []);
+  return [...(ctx.loadedSkills ?? [])].flatMap((n) => recordOutcome(ctx.root, n, verdict === "win", extractSignals(turn)[0]?.detail) ?? []);
 }
 
 /** Chamada ao modelo isolada para poder ser trocada por um fake nos testes e no eval. */
@@ -181,7 +181,7 @@ export function buildReflectInput(turn: TurnRecord, ctx: ToolContext, previous?:
   return (
     `# Skills existentes\n${existing.length ? existing.map((s) => `- ${s.name}${s.scope === "global" ? " (global)" : ""}${staleRefs(ctx.root, s).length ? " [refs obsoletas]" : ""}: ${s.description}`).join("\n") : "(nenhuma)"}\n\n` +
     (pending.length ? `# Propostas pendentes (aguardam revisão do usuário; contam como existentes: para ajustar uma, use o MESMO name)\n${pending.map((p) => `- ${p.name}${p.scope === "global" ? " (global)" : ""}: ${p.description}`).join("\n")}\n\n` : "") +
-    (loaded.length ? `# Skills carregadas neste turno (candidatas a melhoria)\n${loaded.map((s) => `## ${s.name} (${s.scope}) v${s.version}${staleRefs(ctx.root, s).length ? `\n(refs que não existem mais: ${staleRefs(ctx.root, s).join(", ")} — atualize se o turno mostrou os caminhos novos)` : ""}\n${s.body}`).join("\n\n")}\n\n` : "") +
+    (loaded.length ? `# Skills carregadas neste turno (candidatas a melhoria)\n${loaded.map((s) => `## ${s.name} (${s.scope}) v${s.version}${s.lastLoss ? `\n(último tropeço registrado: ${s.lastLoss})` : ""}${staleRefs(ctx.root, s).length ? `\n(refs que não existem mais: ${staleRefs(ctx.root, s).join(", ")} — atualize se o turno mostrou os caminhos novos)` : ""}\n${s.body}`).join("\n\n")}\n\n` : "") +
     (signals.length ? `# Sinais\n${signals.map((x) => `- ${x.kind}: ${x.detail}`).join("\n")}\n\n` : "") +
     (seen.length ? `# Tarefas parecidas já vistas (sessões anteriores)\n${seen.map(describeEntry).join("\n")}\n\n` : "") +
     (previous ? `# Turno anterior (só contexto, não é o que está sendo avaliado)\n${renderPrevious(previous)}\n\n` : "") +

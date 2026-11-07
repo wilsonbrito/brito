@@ -25,12 +25,14 @@ import { startApprovalServer } from "./agent/approval.js";
 import { addRule, loadRules, projectSettingsPath } from "./rules.js";
 import { serveMcp } from "./mcp/server.js";
 import "./tools/skills.js";
+import "./tools/digest.js";
 import type { ToolContext } from "./tools/registry.js";
-import { approvePending, lintSkill, listPending, listSkills, rejectPending, skillsIndex, staleRefs } from "./skills/store.js";
+import { adviseSkill, approvePending, lintSkill, listBuiltins, listPending, listSkills, rejectPending, skillsIndex, staleRefs } from "./skills/store.js";
 import { applyProposal, autoConsolidate, describeProposal, proposeConsolidation, pruneCandidates, type Proposal } from "./skills/consolidate.js";
 import { defaultComplete, recordOutcomes, reflect, shouldReflect, type Complete } from "./skills/learn.js";
 import { expireTrials, skillsMode } from "./skills/trial.js";
 import { claudeCliComplete } from "./skills/learn-cli.js";
+import { pullModel, removeModel, slmStatus, withSlm } from "./local/slm.js";
 import type { TurnRecord } from "./agent/loop.js";
 import type { Msg } from "./provider/types.js";
 import { buildSystemPrompt, graphStatsLine, memoSystem, systemKey } from "./agent/prompt.js";
@@ -83,6 +85,35 @@ program
   .action((o) => {
     const lines = sessionLines(rootOf(o));
     console.log(lines.length ? lines.join("\n") : c.muted("nenhuma sessão salva neste projeto"));
+  });
+
+program
+  .command("slm [acao]")
+  .description("SLM local embutido (llama.cpp): status | pull (baixa o modelo) | rm (apaga). Usado na reflexão de skills; desligue com BRITO_SLM=off")
+  .action(async (acao: string | undefined) => {
+    const st = await slmStatus();
+    if (acao === "pull") {
+      if (!st.lib) { console.error(c.err("node-llama-cpp não está instalado (dependência opcional). Rode: npm install node-llama-cpp")); process.exit(1); }
+      if (st.file) { console.log(c.ok("✦ ") + `modelo já baixado: ${st.file}`); return; }
+      console.log(`baixando ${st.uri} (alguns GB; é retomável com Ctrl+C e rodar de novo)…`);
+      let last = -1;
+      const file = await pullModel((done, total) => {
+        const pct = total ? Math.floor((done / total) * 100) : 0;
+        if (pct >= last + 5 || pct === 100) { last = pct; process.stdout.write(`\r${pct}% (${(done / 1e9).toFixed(2)}/${(total / 1e9).toFixed(2)} GB)`); }
+      });
+      console.log("\n" + c.ok("✦ ") + `pronto: ${file}`);
+      return;
+    }
+    if (acao === "rm") {
+      const f = await removeModel();
+      console.log(f ? c.ok("✦ ") + `removido: ${f}` : c.muted("nenhum modelo baixado"));
+      return;
+    }
+    if (acao && acao !== "status") { console.error(c.err("uso: brito slm [status|pull|rm]")); process.exit(1); }
+    console.log(`  modelo    ${st.uri}`);
+    console.log(`  biblioteca ${st.lib ? c.ok("node-llama-cpp ok") : c.warn("node-llama-cpp ausente (npm install node-llama-cpp)")}`);
+    console.log(`  arquivo   ${st.file ?? c.muted("não baixado: brito slm pull")}`);
+    console.log(`  estado    ${st.disabled ? c.warn("desligado (BRITO_SLM=off)") : st.ready ? c.ok("ativo: a reflexão de skills roda localmente") : c.muted("inativo")}`);
   });
 
 program
@@ -322,7 +353,7 @@ const skillsCommand = (root: string, io: { ask: (q: string, opts?: { force?: boo
           if (!p) { ui.warn(`sem proposta pendente: ${name}`); return; }
           ui.print(`  ${c.soft(p.name)} ${c.muted(`(${p.scope}) ${p.description}`)}\n${p.body.split("\n").map((l) => `  │ ${l}`).join("\n")}`);
           // Avisos do lint (ex.: comando destrutivo) ficam à vista de quem aprova, não só de quem propõe.
-          for (const w of lintSkill(p).warnings) ui.print(c.warn(`  ⚠ ${w}`));
+          for (const w of [...lintSkill(p).warnings, ...adviseSkill(p)]) ui.print(c.warn(`  ⚠ ${w}`));
           if (!(await io.ask(`aprovar a skill ${name}?`, { force: true }))) { ui.info("mantida como pendente"); return; }
           const r = approvePending(root, name);
           ui.print(c.ok("✦ ") + `skill ${name} ativa (${r.scope}, v${r.version})`);
@@ -342,8 +373,9 @@ const skillsCommand = (root: string, io: { ask: (q: string, opts?: { force?: boo
     const skills = listSkills(root);
     for (const s of skills) {
       const stale = staleRefs(root, s);
-      ui.print(`  ${c.soft(s.name)} ${c.muted(`(${s.scope}) v${s.version} · ${s.uses} usos${s.origin === "auto" ? ` · ${s.status === "trial" ? "em teste" : "automática"} ${s.wins}✓/${s.losses}✗` : ""} · último uso ${s.lastUsed} · ${s.description}`)}${stale.length ? " " + c.warn(`⚠ refs obsoletas: ${stale.join(", ")}`) : ""}`);
+      ui.print(`  ${c.soft(s.name)} ${c.muted(`(${s.scope}) v${s.version} · ${s.uses} usos${s.origin === "auto" ? ` · ${s.status === "trial" ? "em teste" : "automática"} ${s.wins}✓/${s.losses}✗` : ""}${s.invoke === "manual" ? " · manual (/" + s.name + ")" : ""}${s.model ? ` · modelo: ${s.model}` : ""}${s.lastLoss ? ` · último tropeço: ${s.lastLoss}` : ""} · último uso ${s.lastUsed} · ${s.description}`)}${stale.length ? " " + c.warn(`⚠ refs obsoletas: ${stale.join(", ")}`) : ""}`);
     }
+    for (const s of listBuiltins(root)) ui.print(`  ${c.soft("/" + s.name)} ${c.muted(`(embutida) ${s.description}`)}`);
     const prune = pruneCandidates(skills);
     if (prune.length) ui.info(`${prune.length} candidata(s) a poda (sem uso há mais de 30 dias): /skills consolidate`);
     if (pending.length) ui.info(`${pending.length} proposta(s) pendente(s): /skills pending`);
@@ -458,7 +490,7 @@ async function buildApiBackend(root: string, model: string, io: { ask: (q: strin
   loadProjectAgents(root);
 
   /** Depois de tarefas complexas (ou uso de skill), propõe criar/melhorar skills. */
-  const learn = makeLearner(() => agent.recentTurns, ctx, defaultComplete, learnModel);
+  const learn = makeLearner(() => agent.recentTurns, ctx, withSlm(defaultComplete), learnModel);
 
   /** Grava a conversa a cada turno (também nos que falharam): `brito -c` retoma de onde parou. */
   const persist = () => {
@@ -507,7 +539,7 @@ async function buildApiBackend(root: string, model: string, io: { ask: (q: strin
       },
       "/index": { desc: "reconstrói o grafo do zero", run: async () => { ui.info("reconstruindo grafo…"); ui.print(c.muted(JSON.stringify(await indexProject(root, graph, { full: true })))); } },
       "/learn": { desc: "extrai skills do último turno agora", run: async () => { await learn(true); } },
-      "/skills": skillsCommand(root, io, { complete: defaultComplete, model: learnModel }),
+      "/skills": skillsCommand(root, io, { complete: withSlm(defaultComplete), model: learnModel }),
       "/permissions": permissionsCommand(root),
       "/todos": { desc: "lista de tarefas da sessão", run: async () => { ctx.todos?.length ? ui.printTodos(ctx.todos) : ui.print(c.muted("  sem lista de tarefas nesta sessão")); } },
       "/sessions": sessionsCommand(root, () => sessionId),
@@ -559,7 +591,7 @@ async function buildClaudeBackend(root: string, io: Io, sw: () => SwitchableBack
 
   // O grafo já foi solto para o servidor MCP; skill_save só usa o store de skills, então `graph` não é tocado.
   const learnCtx: ToolContext = { root, graph: undefined as unknown as GraphStore, ask: (q, opts) => io.ask(q, opts), sync: async () => {}, dirty: false, loadedSkills: session.loadedSkills };
-  const learn = makeLearner(() => session.recentTurns, learnCtx, claudeCliComplete, () => process.env.BRITO_LEARN_MODEL ?? ""); // "" = modelo padrão do claude
+  const learn = makeLearner(() => session.recentTurns, learnCtx, withSlm(claudeCliComplete), () => process.env.BRITO_LEARN_MODEL ?? ""); // "" = modelo padrão do claude
 
   if (model) { session.requestedModel = resolveModel(model).wireModel; session.model = session.requestedModel; }
   session.effort = initialEffort();
@@ -658,7 +690,7 @@ async function buildClaudeBackend(root: string, io: Io, sw: () => SwitchableBack
       },
       "/context": unavailable,
       "/learn": { desc: "extrai skills do último turno agora", run: async () => { await learn(true); } },
-      "/skills": skillsCommand(root, io, { complete: claudeCliComplete, model: () => process.env.BRITO_LEARN_MODEL ?? "" }),
+      "/skills": skillsCommand(root, io, { complete: withSlm(claudeCliComplete), model: () => process.env.BRITO_LEARN_MODEL ?? "" }),
       "/permissions": permissionsCommand(root),
       "/sessions": sessionsCommand(root, () => session.sessionId),
     },

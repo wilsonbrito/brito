@@ -9,6 +9,7 @@ import "../tools/graph.js";
 import "../tools/delegate.js";
 import "../tools/plan.js";
 import "../tools/skills.js";
+import "../tools/digest.js";
 import "../tools/todo.js";
 import { Agent, type TurnRecord } from "../agent/loop.js";
 import { loadSession, repairHistory, saveSession, titleOf, type SavedSession } from "../agent/sessions.js";

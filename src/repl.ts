@@ -12,7 +12,7 @@ import { cols } from "./ui/theme.js";
 const userName = () => {
   try { return os.userInfo().username; } catch { return process.env.USER ?? process.env.USERNAME ?? "você"; }
 };
-import { listPending, listSkills, deleteSkill, promoteSkill, globalHome } from "./skills/store.js";
+import { listPending, listSkills, listBuiltins, getSkill, suggestSkills, deleteSkill, promoteSkill, globalHome } from "./skills/store.js";
 import { listAgents } from "./agent/agents.js";
 import { perms, cycleMode, MODE_LABEL, type PermMode } from "./permissions.js";
 
@@ -96,7 +96,7 @@ const COMMON: Record<string, string> = {
   "/help": "esta ajuda",
   "/agents": "subagentes disponíveis",
   "/indicadores": "explica os números da barra de status",
-  "/skills": "lista; pending | approve <nome> | reject <nome> | consolidate | rm <nome> | promote <nome>",
+  "/skills": "lista; suggest <tarefa> | pending | approve <nome> | reject <nome> | consolidate | rm <nome> | promote <nome>",
   "/modo": "mostra ou troca o modo (manual, auto, plano) — ou Shift+Tab",
   "/clear": "começa outra conversa (a anterior fica salva)",
   "/sair": "encerra (ou Ctrl+C duas vezes)",
@@ -107,7 +107,11 @@ export async function runRepl(b: ReplBackend, o: ReplOpts) {
   let skillCount = listSkills(o.root).length;
   const refreshSkills = () => { skillCount = listSkills(o.root).length; };
 
+  // Skills de invocação manual (embutidas ou do usuário) viram /nome, com Tab.
+  const skillCmds = [...listBuiltins(o.root), ...listSkills(o.root).filter((s) => s.invoke === "manual")]
+    .map((s) => ({ name: `/${s.name}`, desc: `skill: ${s.description}` }));
   const menu: Command[] = [
+    ...skillCmds,
     ...Object.entries(b.commands).map(([name, v]) => ({ name, desc: v.desc })),
     ...Object.entries(COMMON).map(([name, desc]) => ({ name, desc })),
   ].sort((x, y) => x.name.localeCompare(y.name));
@@ -186,9 +190,17 @@ export async function runRepl(b: ReplBackend, o: ReplOpts) {
     // Este tratador vale antes de `b.commands` (ver `run` mais abaixo): ele cuida de `promote` e `rm` e DELEGA o resto
     // (listar, pending, approve, reject, consolidate) ao /skills do backend. Sem a delegação, esse /skills completo
     // ficava escondido e a revisão de propostas pendentes era inalcançável no REPL.
-    "/skills": async ([sub, name]) => {
+    "/skills": async ([sub, name, ...rest]) => {
+      const args = [name, ...rest].filter((x): x is string => !!x);
       const full = b.commands["/skills"];
-      if (sub === "promote" && name) { try { promoteSkill(o.root, name); ui.print(c.ok(`promovida para global: ${name}`)); } catch (e: any) { ui.error(e.message); } }
+      if (sub === "suggest") {
+        const q = args.join(" ");
+        const found = q ? suggestSkills(o.root, q) : [];
+        if (!q) ui.warn("uso: /skills suggest <descrição da tarefa>");
+        else if (!found.length) ui.print(c.dim("  (nenhuma skill parecida)"));
+        else for (const { skill: s, score } of found) ui.print(`  ${c.soft(s.invoke === "manual" ? "/" + s.name : s.name)} ${c.muted(`(${score.toFixed(1)}) ${s.description}`)}`);
+      }
+      else if (sub === "promote" && name) { try { promoteSkill(o.root, name); ui.print(c.ok(`promovida para global: ${name}`)); } catch (e: any) { ui.error(e.message); } }
       else if (sub === "rm" && name) ui.print(deleteSkill(o.root, name) ? c.ok(`removida: ${name}`) : c.warn(`não existe: ${name}`));
       else if (full && (sub || listSkills(o.root).length || listPending(o.root).length)) await full.run([sub, name].filter((x): x is string => !!x));
       else ui.print(c.dim("  (nenhuma skill ainda)"));
@@ -239,6 +251,18 @@ export async function runRepl(b: ReplBackend, o: ReplOpts) {
     if (key === "/sair" || key === "/exit") { await shutdown(); return; }
     const run = line.startsWith("/") ? common[key] ?? b.commands[key]?.run : undefined;
     if (run) { await run(args); return; }
+    // /nome de uma skill: o usuário a invoca de propósito (inclusive as manuais). Argumentos viram o contexto.
+    const sk = line.startsWith("/") && !cmd.slice(1).includes("/") ? getSkill(o.root, key.slice(1)) : null;
+    if (sk) {
+      const one = args.includes("--um") || args.includes("--one");
+      const ctxText = args.filter((x) => x !== "--um" && x !== "--one").join(" ");
+      const msg = `Invoquei a skill ${sk.name}. Chame skill_load("${sk.name}") agora e siga-a.${one ? " Faça UMA pergunta por mensagem." : ""}${ctxText ? `\n\nContexto: ${ctxText}` : "\n\n(Sem contexto extra: comece perguntando sobre o que quero trabalhar.)"}`;
+      const ac = (running = new AbortController());
+      dock?.setBusy(true);
+      try { await b.turn(msg, ac.signal); await b.afterTurn?.(); }
+      finally { running = null; dock?.setBusy(false); refreshSkills(); dock?.repaint(); }
+      return;
+    }
     // "/Users/x/arquivo.pdf" é caminho, não comando: segue como mensagem ao agente
     if (line.startsWith("/") && !cmd.slice(1).includes("/")) {
       ui.warn(`comando desconhecido: ${cmd}. Digite /help.`);

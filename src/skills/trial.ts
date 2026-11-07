@@ -18,10 +18,10 @@ export const TRIAL_DAYS = 21;
 export const DAILY_LIMIT = 3;
 
 /** Registra o resultado de um turno que usou a skill. Devolve um aviso se ela foi promovida ou arquivada. */
-export function recordOutcome(root: string, name: string, win: boolean): string | null {
+export function recordOutcome(root: string, name: string, win: boolean, loss?: string): string | null {
   const s = getSkill(root, name);
-  if (!s) return null;
-  const next = { ...s, wins: s.wins + (win ? 1 : 0), losses: s.losses + (win ? 0 : 1) };
+  if (!s || s.builtin) return null;
+  const next = { ...s, wins: s.wins + (win ? 1 : 0), losses: s.losses + (win ? 0 : 1), lastLoss: win ? s.lastLoss : (loss ?? s.lastLoss).replace(/\s+/g, " ").slice(0, 200) };
   if (s.origin === "auto") {
     if (s.status === "trial") {
       if (next.wins >= PROMOTE_WINS && next.wins >= 3 * next.losses) {

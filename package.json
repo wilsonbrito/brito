@@ -73,5 +73,8 @@
   ],
   "overrides": {
     "tar": "^7.5.22"
+  },
+  "optionalDependencies": {
+    "node-llama-cpp": "^3.22.3"
   }
 }
