@@ -73,6 +73,15 @@ flowchart LR
 
 The lint **rejects** secrets/tokens, absolute user paths, credentials in URLs (`user:password@host`), `curl | sh`, and instructions to override rules or skip approval. It **warns** (without blocking) about commands that destroy data: removing database or data files, `DROP`/`TRUNCATE`, `DELETE` without `WHERE`, migration resets, `git reset --hard`, force-push, Docker volume removal. A skill is a standing instruction, so a step that was only safe in the state of one moment must not silently become the default.
 
+## Local model (optional)
+
+`brito slm pull` downloads a small local model (Qwen3-4B-Instruct-2507 Q4_K_M, Apache-2.0) to `~/.brito/models` through the optional `node-llama-cpp` dependency. `brito slm` shows the status and `brito slm rm` deletes it. Once downloaded it is used for:
+
+- **Skill learning**: the reflection runs locally with grammar-constrained JSON and falls back to the usual model on any failure.
+- **`digest` tool**: a scout and refiner for long texts. The local model picks the blocks most related to your objective and proposes excerpts; code then checks every quote against the source and drops what is not there, so the main model gets a small markdown draft with verified quotes and page numbers.
+
+`BRITO_SLM=off` disables it; `BRITO_SLM_MODEL` points to another GGUF (`hf:` URI or file path).
+
 ## Install
 
 ### Terminal (`brito-cli`)
@@ -132,6 +141,7 @@ brito "who calls parseConfig?"   # single prompt, no REPL
 brito index                 # (re)index the graph; it is also kept up to date automatically
 brito -c                    # resume the most recent session in this project
 brito sessions              # list saved sessions; resume one with brito --resume <id>
+brito slm pull              # (optional) download the local model used by digest and skill learning
 brito query "MATCH (c:Symbol {kind:'component'})-[:CALLS]->(f:Symbol) RETURN c.file, f.name LIMIT 5"
 ```
 
@@ -154,6 +164,8 @@ OK: 20 arquivos, 66 símbolos, 54 chamadas, 17 imports | +0 ~0 -0 =20 (28ms)
 | `/skills` | list skills · `pending` · `approve <name>` · `reject <name>` · `consolidate` · `rm <name>` · `promote <name>` |
 | `/permissions` | list permission rules · `allow <rule>` · `deny <rule>` |
 | `/learn` | extract skills from the last turn now |
+| `/grill-me`, `/grill-with-docs`, `/wayfinder`, `/grill-diff` | built-in manual skills: interview you until the idea is firm (`--um` = one question per message), also save decisions with `remember`, map big work and delegate, question the current diff |
+| `/skills suggest <task>` | rank skills (built-ins included) by relevance to a task |
 | `/agents`, `/tools`, `/index`, `/context` | inspect subagents, tools, the index and the context window |
 | `!command` | run a shell command directly, without calling the model |
 | `/todos` | show the session's task list (the agent keeps it with `todo_write` on multi-step tasks) |

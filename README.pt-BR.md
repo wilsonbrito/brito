@@ -69,6 +69,15 @@ flowchart LR
 
 O lint **rejeita** segredos/tokens, caminhos absolutos do usuário, credenciais em URL (`usuario:senha@host`), `curl | sh` e instruções para sobrepor regras ou pular aprovação. Ele **avisa** (sem bloquear) sobre comandos que destroem dados: apagar arquivos de banco ou de dados, `DROP`/`TRUNCATE`, `DELETE` sem `WHERE`, reset de migrações, `git reset --hard`, force push, remoção de volumes do Docker. Uma skill é uma instrução permanente, então um passo que só era seguro no estado de um momento não pode virar o padrão em silêncio.
 
+## Modelo local (opcional)
+
+`brito slm pull` baixa um modelo local pequeno (Qwen3-4B-Instruct-2507 Q4_K_M, Apache-2.0) para `~/.brito/models`, pela dependência opcional `node-llama-cpp`. `brito slm` mostra o status e `brito slm rm` o apaga. Depois de baixado, ele é usado em:
+
+- **Aprendizado de skills**: a reflexão roda localmente com JSON restrito por gramática e cai no modelo de sempre se algo falhar.
+- **Tool `digest`**: batedor e refinador de textos longos. O modelo local escolhe os blocos mais ligados ao seu objetivo e propõe trechos; o código confere cada citação contra a fonte e descarta o que não existe, e o modelo principal recebe um rascunho pequeno em markdown com citações verificadas e números de página.
+
+`BRITO_SLM=off` desliga; `BRITO_SLM_MODEL` aponta para outro GGUF (URI `hf:` ou caminho de arquivo).
+
 ## Instalação
 
 ### Terminal (`brito-cli`)
@@ -128,6 +137,7 @@ brito "quem chama parseConfig?"   # prompt único, sem REPL
 brito index                 # (re)indexa o grafo; ele também se mantém atualizado sozinho
 brito -c                    # retoma a sessão mais recente deste projeto
 brito sessoes               # lista as sessões salvas; retome uma com brito --resume <id>
+brito slm pull              # (opcional) baixa o modelo local usado por digest e pelo aprendizado de skills
 brito query "MATCH (c:Symbol {kind:'component'})-[:CALLS]->(f:Symbol) RETURN c.file, f.name LIMIT 5"
 ```
 
@@ -150,6 +160,8 @@ OK: 20 arquivos, 66 símbolos, 54 chamadas, 17 imports | +0 ~0 -0 =20 (28ms)
 | `/skills` | lista skills · `pending` · `approve <nome>` · `reject <nome>` · `consolidate` · `rm <nome>` · `promote <nome>` |
 | `/permissions` | lista as regras de permissão · `allow <regra>` · `deny <regra>` |
 | `/learn` | extrai skills do último turno agora |
+| `/grill-me`, `/grill-with-docs`, `/wayfinder`, `/grill-diff` | skills manuais embutidas: entrevista até a ideia ficar firme (`--um` = uma pergunta por mensagem), também grava decisões com `remember`, mapeia trabalho grande e delega, questiona o diff atual |
+| `/skills suggest <tarefa>` | ranqueia as skills (embutidas inclusive) por relevância para a tarefa |
 | `/agents`, `/tools`, `/index`, `/context` | inspecionam subagentes, tools, o índice e a janela de contexto |
 | `!comando` | roda um comando no shell direto, sem chamar o modelo |
 | `/todos` | mostra a lista de tarefas da sessão (o agente a mantém com `todo_write` em tarefas de vários passos) |
