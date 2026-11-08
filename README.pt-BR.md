@@ -110,7 +110,9 @@ export ANTHROPIC_API_KEY=sk-ant-...      # API da Anthropic
 
 ### App de desktop (executável)
 
-O mesmo agente numa janela: projetos e sessões numa barra lateral, chat com markdown, chamadas de ferramenta recolhíveis, pedidos de permissão e seletores de modelo, esforço e modo de permissão. Não precisa de Node nem de terminal.
+O mesmo agente numa janela: projetos e sessões numa barra lateral, chat com streaming, markdown e copiar código, cartões de ferramenta com diff nas edições, lista de tarefas fixa, pedidos de permissão com diff ("permitir uma vez / nesta sessão / sempre neste projeto") e seletores de modelo, esforço e modo de permissão. Não exige Node nem terminal (no Windows o grafo de código ainda precisa do Node.js 20+).
+
+Além do chat: `/` abre comandos e skills, `@` escolhe arquivos do projeto (ou arraste arquivos para o campo), `Ctrl/Cmd+K` abre a paleta (ações e busca em todas as sessões), há painéis de Skills, Agentes, Grafo de código, Memória e Arquivos alterados, selo do motor (nuvem / endpoint / local) com aviso de fallback, tema claro/escuro e exportação em markdown.
 
 ![App de desktop do Brito respondendo uma pergunta com o grafo de código](docs/images/desktop-app.png)
 
@@ -280,7 +282,7 @@ Os dados do projeto ficam em `.brito/` (grafo, skills do projeto, agentes) e os 
 ## Limitações
 
 - Software em fase inicial (v0.5.0), um mantenedor.
-- O app de desktop é novo: uma janela só (sem abas ainda). Conversas do modo API feitas antes desta versão não são retomadas ao reabrir o app (as novas são, a partir de `.brito/sessions`).
+- O app de desktop é jovem: uma janela só (sem abas ainda) e sem anexo de imagem (arraste arquivos para referenciá-los com `@caminho`). Conversas do modo API feitas antes desta versão não são retomadas ao reabrir o app (as novas são, a partir de `.brito/sessions`).
 - **A interface e o idioma padrão do agente são português do Brasil.** Traduzi-los é uma contribuição bem-vinda.
 - O aprendizado de skills é heurístico: ele propõe, você decide. Espere rejeitar algumas propostas.
 

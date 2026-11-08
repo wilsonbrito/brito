@@ -114,7 +114,9 @@ export ANTHROPIC_API_KEY=sk-ant-...      # Anthropic API
 
 ### Desktop app (executable)
 
-The same agent in a window: projects and sessions in a sidebar, chat with markdown, collapsible tool calls, permission prompts, and pickers for model, effort and permission mode. It needs neither Node nor a terminal.
+The same agent in a window: projects and sessions in a sidebar, streaming chat with markdown and code copy, tool cards with diffs for edits, a pinned task list, permission prompts with a diff ("allow once / this session / always in this project"), and pickers for model, effort and permission mode. It needs neither Node nor a terminal (on Windows the code graph still needs Node.js 20+).
+
+Beyond the chat: type `/` for commands and skills, `@` to pick project files (or drop files on the box), `Ctrl/Cmd+K` for the command palette (actions and full-text search across sessions), panels for Skills, Agents, the code Graph, Memory and Changed files, an engine badge (cloud / endpoint / local) with a fallback warning, light/dark theme and export to markdown.
 
 ![Brito desktop app answering a question with the code graph](docs/images/desktop-app.png)
 
@@ -277,7 +279,7 @@ Project data lives in `.brito/` (graph, project skills, agents) and global data 
 ## Limitations
 
 - Early software (v0.5.0), one maintainer.
-- The desktop app is new: a single window (no tabs yet). API-mode conversations from before this version are not resumed when you reopen the app (new ones are, from `.brito/sessions`).
+- The desktop app is young: a single window (no tabs yet), and no image attachments (drop files to reference them with `@path`). API-mode conversations from before this version are not resumed when you reopen the app (new ones are, from `.brito/sessions`).
 - **The interface and the agent's default language are Brazilian Portuguese.** Translating them is a welcome contribution.
 - Skill learning is a heuristic: it proposes, you decide. Expect some proposals to be rejected.
 
