@@ -98,3 +98,32 @@ jobs:
             desktop/dist-app/*.dmg
             desktop/dist-app/*.tar.gz
             desktop/dist-app/*.exe
+
+  # npm: só depois de todos os instaladores saírem certos, e só em tag. Sem token: usa o Trusted Publisher do npm
+  # (configurado em npmjs.com → brito-cli → Settings → Trusted Publisher: wilsonbrito/brito, workflow desktop.yml).
+  npm:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # o npm troca este token OIDC pela permissão de publicar
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: 22, registry-url: "https://registry.npmjs.org" }
+      - run: npm i -g npm@latest   # Trusted Publishing exige npm >= 11.5.1
+      - name: A tag precisa bater com o package.json
+        run: |
+          v="$(node -p "require('./package.json').version")"
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME != package.json $v"; exit 1; }
+      - run: npm ci
+      - run: npm run build
+      - name: Pular se esta versão já está no npm
+        id: seen
+        run: |
+          v="$(node -p "require('./package.json').version")"
+          if npm view "brito-cli@$v" version >/dev/null 2>&1; then echo "skip=true" >> "$GITHUB_OUTPUT"; echo "brito-cli@$v já publicado"; fi
+      # testes já rodaram no job "package"; --ignore-scripts evita repeti-los (o build acima gerou o dist)
+      - if: steps.seen.outputs.skip != 'true'
+        run: npm publish --provenance --access public --ignore-scripts

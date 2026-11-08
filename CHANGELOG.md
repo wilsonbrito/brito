@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.9.0 — 2026-11-08
+
+The desktop app gets a real interface: streaming, diffs, panels and the same resources as the terminal.
+
+### Added
+- Streaming text with incremental rendering (no more flicker or lost selection), tool cards with diffs for `edit_file`/`write_file`, full tool output (up to 20000 chars), a subagent card and a pinned task list.
+- Permission prompts show a colored diff and offer "allow for this session" and "always in this project" (remembered per folder in `~/.brito/desktop-allow.json`; plan/skill approvals always ask).
+- Composer: `/` menu with commands and skills (manual skills run like in the terminal), `@` file autocomplete, drag files in, history with ↑/↓, Esc to interrupt, `/clear`, `/help`.
+- Engine badge (cloud / endpoint / local) with a fallback warning, and endpoint profiles in the model picker.
+- Panels for Skills (approve/reject/promote/remove), Agents, Code graph (search, callers/callees, reindex), Memory (notes) and Changed files.
+- Ctrl/Cmd+K command palette, full-text search across sessions, light/dark/system theme, export conversation to markdown.
+- Typed and versioned app ↔ backend protocol; the app warns when it and the CLI are out of sync.
+- `npm run release <X.Y.Z>` prepares a release (clean tree, CHANGELOG, typecheck, tests, bump, tag). Pushing the tag builds the installers, creates the GitHub Release and publishes to npm (Trusted Publishing, no token).
+
+### Fixed
+- On Windows without Node.js the desktop app now says what is missing instead of failing with `ERR_DLOPEN_FAILED`.
+- When the backend dies, the conversation says so and the next message reconnects and resumes.
+
+## 0.8.0 — 2026-11-07
+
+Cheaper and smarter turns with an Anthropic API key. Permission rules, and no more edits made from memory. Resume where you left off, and a visible task list.
+
+### Added
+- The local SLM is now the last fallback when Claude runs out (quota, rate limit, credit, auth, overload): chain Claude → `qwen` profile → SLM, so it also works for those without a `qwen` profile. It runs the full agent loop with tools (the model only asks for a call; permissions, hooks and "read before edit" apply as always), and `/model slm` uses it directly. The switch is temporary: after a window (the reset time the error reports, e.g. "resets 3pm", else 10 min, or 60 min for quota/auth; `BRITO_FALLBACK_MINUTES` overrides) the next turn tries Claude again and, if it still fails, falls back with a new window. `/fallback` shows when Claude will be retried. `BRITO_SLM_FALLBACK=off` removes the SLM from the chain; `BRITO_SLM_CTX` sets its context (default 16384). In `claude` CLI mode and in the desktop app the chain applies, but the way back to Claude is still `/model <claude>`.
+- `digest` tool: "scout and refiner" for long texts. The local SLM walks a big file (the blocks most related to your objective), proposes excerpts and groups them into an outline; code then checks every quote against the source (OCR spacing and hyphenation are tolerated) and drops what is not there, so the main model receives a small markdown draft with verified quotes and page numbers. Needs `brito slm pull`. On a 757 KB book it analyzed 8 of 220 blocks in ~40 s and produced a 4 KB draft (12 of 17 proposed quotes verified). Cover, flap blurbs, table of contents and copyright pages of long page-marked books are skipped automatically.
+
+- Embedded local SLM (llama.cpp through the optional `node-llama-cpp` dependency, default Qwen3-4B-Instruct-2507 Q4_K_M, Apache-2.0). `brito slm` shows status, `brito slm pull` downloads the model to `~/.brito/models` (explicit and resumable), `brito slm rm` deletes it. Once downloaded, the skill-learning reflection runs locally with grammar-constrained JSON output and falls back to the usual model on any failure. `BRITO_SLM=off` disables it; `BRITO_SLM_MODEL` points to another GGUF (`hf:` URI or file path).
+
+- Built-in manual skills, run with `/grill-me`, `/grill-with-docs`, `/wayfinder` and `/grill-diff` (Tab completes them; `--um` asks one question per message). `grill-me` interviews you in rounds until the idea is firm, using the graph to avoid asking what the code already answers; `grill-with-docs` also saves each decision with `remember`; `wayfinder` maps big work into parts and delegates; `grill-diff` questions the current diff using `graph_impact`. A skill with the same name in `.brito/skills` overrides the built-in.
+- Skill frontmatter `invoke: manual` (only runs via `/name`, kept out of the prompt index) and `model:` (recommended model, shown by `skill_load` and `/skills`). Both are accepted by `skill_save`.
+- `/skills suggest <task>` ranks skills (built-ins included) by relevance; `skill_load` with an unknown name returns similar skills.
+- Skills remember what went wrong on their last failed turn (`lastLoss`), shown in `/skills`, `skill_load` and the learning step.
+- Quality hints when saving a skill: body over 3000 chars (split it) or no verification/exit criterion.
+
+- Permission rules in `.brito/settings.json`, `.brito/settings.local.json` or `~/.brito/settings.json`: `allow` skips the prompt for matching commands or paths (e.g. `bash(npm test:*)`, `edit_file(src/**)`), `deny` blocks them in every mode, including "everything allowed". A compound command is allowed only if every piece matches, and commands with `$(...)`, backticks or file redirection are never allowed by a rule. The rules also apply to the `claude` CLI's Bash, Edit and Write.
+- `/permissions` lists the rules; `/permissions allow <rule>` and `/permissions deny <rule>` add one to the project settings.
+- Sessions are saved per project in `.brito/sessions/` (git-ignored). `brito -c` resumes the most recent one and `brito --resume <id>` a specific one (the first characters of the id are enough); `brito sessions` and `/sessions` list them. In API mode Brito keeps the whole history; in `claude` CLI mode it keeps the session id and resumes through the CLI. A session reopens in the engine that recorded it. Attached images are not written to disk.
+- The desktop app now really resumes API-mode conversations when it reopens (it used to show them while the model started over).
+- `todo_write` tool: on multi-step tasks the agent keeps a task list, shown under the tool line in the terminal, in the desktop app and with `/todos`. It is saved with the session. Subagents cannot change it.
+
+### Changed
+- The skill index in the system prompt lists the 25 top-ranked skills (was 40) and says how many were left out.
+- The conversation is now prompt-cached, not only the system prompt. Each step of a multi-tool turn reads the earlier history from cache instead of paying for it again.
+- The system prompt stays byte-identical during a session. It is rebuilt only when plan mode toggles, the graph stops being empty or the set of skills changes, so a graph sync or a skill being used no longer invalidates the cache.
+- `/reasoning` now applies to the Anthropic API (it used to affect only the `claude` CLI and OpenAI-compatible endpoints): the level is sent as `output_config.effort`. `none` turns thinking off where the model allows it (`between_tools` on Sonnet 5.5) and becomes effort `low` on models whose thinking cannot be disabled (Opus 5.5, Fable).
+- Responses from Claude can be up to 32k tokens (was 8192), so a large `write_file` is no longer cut off. Requests always stream.
+- `edit_file` and `write_file` refuse to change an existing file that was not read in the session, or that changed since it was read (by a command, by you or by another process). The model is told to read it again; the check runs before the approval prompt, so you are not asked to approve an edit that would fail.
+- `/clear` starts a new session; the previous one stays saved.
+
 ## 0.7.5 — 2026-10-30
 
 Brito now creates and edits skills on its own in "allow everything" mode.

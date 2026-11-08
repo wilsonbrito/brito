@@ -18,7 +18,7 @@ O Brito é um agente para desenvolvimento de software. Use no terminal (`brito-c
 - **Cobertura ampla.** TypeScript/JavaScript, Python e os blocos de script de componentes `.svelte`, `.vue` e `.astro`. Aliases de import (`paths` do tsconfig, `imports` do package.json, `$lib` do SvelteKit) viram arestas de verdade. O que o `.gitignore` ignora fica de fora.
 - **Skills que aprendem sozinhas, em período de teste.** Depois de uma tarefa em que algo tropeçou ou foi corrigido, o Brito reflete e cria uma skill *em teste* sem te interromper. A skill se prova pelo uso: 3 usos limpos a promovem, 2 tropeços a arquivam (recuperável). O que é arriscado, ou qualquer mudança numa skill que você aprovou, continua esperando o seu `/skills approve`. `BRITO_SKILLS=ask` volta a pedir aprovação para tudo; `off` desliga o aprendizado.
 - **Proteções sobre o que é aprendido.** Um lint rejeita segredos, credenciais embutidas em URL, `curl | sh` e frases de injeção de prompt, e **avisa sobre comandos destrutivos** (veja abaixo).
-- **Modos de permissão.** manual, auto-edições, plano e "tudo liberado" (`Shift+Tab` alterna). As skills autônomas não dependem do modo: nascem em teste e são julgadas pelo resultado.
+- **Modos e regras de permissão.** manual, auto-edições, plano e "tudo liberado" (`Shift+Tab` alterna), mais regras `allow`/`deny` por comando ou caminho (veja [Regras de permissão](#regras-de-permissão)). Editar um arquivo exige tê-lo lido na sessão, sem mudanças desde então. As skills autônomas não dependem do modo: nascem em teste e são julgadas pelo resultado.
 - **Dois backends, uma interface.** Use uma chave da API da Anthropic ou a sua assinatura do Claude Code pela CLI `claude`. O Brito nunca lê nem envia o token da sua assinatura.
 - **Terminal ou app de desktop.** `npm i -g brito-cli` instala o comando `brito`; o app de desktop é um executável nativo com janela (projetos e sessões numa barra lateral, chat, pedidos de permissão), sem precisar de Node nem de terminal. Veja [Instalação](#instalação).
 - **Imagens.** Arraste um arquivo de imagem para o prompt (ou cole o caminho) e ele é anexado ao turno: PNG, JPEG, GIF ou WebP, até 5 MB.
@@ -68,6 +68,17 @@ flowchart LR
 4. Uma skill pode ser do projeto ou **global** (vale em todos os projetos); `/skills promote` move uma para global.
 
 O lint **rejeita** segredos/tokens, caminhos absolutos do usuário, credenciais em URL (`usuario:senha@host`), `curl | sh` e instruções para sobrepor regras ou pular aprovação. Ele **avisa** (sem bloquear) sobre comandos que destroem dados: apagar arquivos de banco ou de dados, `DROP`/`TRUNCATE`, `DELETE` sem `WHERE`, reset de migrações, `git reset --hard`, force push, remoção de volumes do Docker. Uma skill é uma instrução permanente, então um passo que só era seguro no estado de um momento não pode virar o padrão em silêncio.
+
+## Modelo local (opcional)
+
+`brito slm pull` baixa um modelo local pequeno (Qwen3-4B-Instruct-2507 Q4_K_M, Apache-2.0) para `~/.brito/models`, pela dependência opcional `node-llama-cpp`. `brito slm` mostra o status e `brito slm rm` o apaga. Depois de baixado, ele é usado em:
+
+- **Aprendizado de skills**: a reflexão roda localmente com JSON restrito por gramática e cai no modelo de sempre se algo falhar.
+- **Tool `digest`**: batedor e refinador de textos longos. O modelo local escolhe os blocos mais ligados ao seu objetivo e propõe trechos; o código confere cada citação contra a fonte e descarta o que não existe, e o modelo principal recebe um rascunho pequeno em markdown com citações verificadas e números de página.
+
+- **Fallback quando o Claude acaba**: cadeia Claude → perfil `qwen` → SLM local, com o loop completo do agente e as tools (mesmas permissões). É temporário: passada a janela (o horário de reset que o erro informa, senão 10 min, ou 60 min para cota/auth; `BRITO_FALLBACK_MINUTES` sobrepõe) o próximo turno tenta o Claude de novo. O `/fallback` mostra quando. Um modelo de 4B erra mais com tools: use para continuar, não para tarefas grandes. `BRITO_SLM_FALLBACK=off` tira o SLM da cadeia; `BRITO_SLM_CTX` define o contexto.
+
+`BRITO_SLM=off` desliga; `BRITO_SLM_MODEL` aponta para outro GGUF (URI `hf:` ou caminho de arquivo).
 
 ## Instalação
 
@@ -126,6 +137,9 @@ cd seu-projeto
 brito                       # abre o REPL
 brito "quem chama parseConfig?"   # prompt único, sem REPL
 brito index                 # (re)indexa o grafo; ele também se mantém atualizado sozinho
+brito -c                    # retoma a sessão mais recente deste projeto
+brito sessoes               # lista as sessões salvas; retome uma com brito --resume <id>
+brito slm pull              # (opcional) baixa o modelo local usado por digest e pelo aprendizado de skills
 brito query "MATCH (c:Symbol {kind:'component'})-[:CALLS]->(f:Symbol) RETURN c.file, f.name LIMIT 5"
 ```
 
@@ -146,10 +160,15 @@ OK: 20 arquivos, 66 símbolos, 54 chamadas, 17 imports | +0 ~0 -0 =20 (28ms)
 | `/fallback` | mostra o modelo principal e o fallback (qwen), e se a troca já aconteceu |
 | `/modo` ou `Shift+Tab` | troca o modo de permissão: manual → auto-edições → plano → tudo liberado |
 | `/skills` | lista skills · `pending` · `approve <nome>` · `reject <nome>` · `consolidate` · `rm <nome>` · `promote <nome>` |
+| `/permissions` | lista as regras de permissão · `allow <regra>` · `deny <regra>` |
 | `/learn` | extrai skills do último turno agora |
+| `/grill-me`, `/grill-with-docs`, `/wayfinder`, `/grill-diff` | skills manuais embutidas: entrevista até a ideia ficar firme (`--um` = uma pergunta por mensagem), também grava decisões com `remember`, mapeia trabalho grande e delega, questiona o diff atual |
+| `/skills suggest <tarefa>` | ranqueia as skills (embutidas inclusive) por relevância para a tarefa |
 | `/agents`, `/tools`, `/index`, `/context` | inspecionam subagentes, tools, o índice e a janela de contexto |
 | `!comando` | roda um comando no shell direto, sem chamar o modelo |
-| `/clear`, `/exit` | limpa a conversa, sai |
+| `/todos` | mostra a lista de tarefas da sessão (o agente a mantém com `todo_write` em tarefas de vários passos) |
+| `/sessions` | lista as sessões salvas deste projeto |
+| `/clear`, `/exit` | começa outra conversa (a anterior continua salva), sai |
 
 ## O que o grafo indexa
 
@@ -158,6 +177,26 @@ OK: 20 arquivos, 66 símbolos, 54 chamadas, 17 imports | +0 ~0 -0 =20 (28ms)
 - **Imports:** relativos e por alias. Resolve `paths`/`baseUrl` do `tsconfig.json`/`jsconfig.json` (seguindo `extends` relativo, como o `.svelte-kit/tsconfig.json`), `imports` do `package.json` (`#interno/*`) e o `$lib` do SvelteKit. A configuração vale por arquivo (a mais próxima), então monorepos funcionam; editar um tsconfig reindexa os arquivos afetados.
 - **Linguagens de backend:** o grafo guarda classes/interfaces/structs/traits/enums/módulos, funções e métodos (`Classe.metodo`), chamadas e imports. Nelas o import nomeia um pacote, não um caminho; o Brito casa o especificador com o final do caminho dos seus arquivos (`com.acme.Repo` ↔ `src/main/java/com/acme/Repo.java`; namespaces PSR-4 do PHP; `use crate::…` do Rust; `require`/`require_relative` do Ruby; pacotes Go pelo módulo do `go.mod`). Pacote externo (`java.util`, `serde`, `github.com/gin-gonic/gin`) nunca casa e não gera aresta. Não há inferência de tipos: `userRepository.save()` é ligado casando o nome do receptor com um tipo do projeto (`UserRepository`), `this`/`self`/receiver resolvem para a classe que contém a chamada, e uma chamada solta dentro de classe tenta primeiro os métodos da própria classe.
 - **Ainda não:** `extends` por pacote (`@tsconfig/node20`), `exports` de workspaces vizinhos e referências de função sem chamada em um template (`onclick={fn}`). As chamadas são resolvidas estaticamente, com fallback por nome, então despacho dinâmico e reflexão não são capturados.
+
+## Regras de permissão
+
+Para não aprovar o mesmo comando toda vez (nem precisar do "tudo liberado"), declare regras em `.brito/settings.json` (do projeto, pode ir para o git), `.brito/settings.local.json` (só seu) ou `~/.brito/settings.json` (todos os projetos). As listas se somam.
+
+```json
+{
+  "permissions": {
+    "allow": ["bash(npm test:*)", "bash(npm run typecheck)", "bash(git status:*)", "edit_file(src/**)"],
+    "deny": ["bash(git push:*)", "bash(rm -rf*)", "read_file(.env*)"]
+  }
+}
+```
+
+- `tool` vale para qualquer uso; `tool(padrão)` restringe. Em `bash`, `*` casa qualquer coisa e `:*` no fim casa o prefixo sozinho ou com argumentos (`git status:*` libera `git status --short`, não `git statusx`). Em caminhos, `*` não cruza diretórios e `**` cruza.
+- **`allow` dispensa a pergunta** nos modos manual e auto-edições. O modo plano continua bloqueando.
+- **`deny` bloqueia sempre**, inclusive no "tudo liberado".
+- Um comando composto só é liberado se **cada pedaço** (`&&`, `||`, `;`, `|`) casar com uma regra: `bash(npm test*)` não libera `npm test && rm -rf ~`. Comandos com `$(...)`, crases ou redirecionamento para arquivo nunca são liberados por regra; `2>&1` e `> /dev/null` podem.
+- As regras valem também para o Bash, o Edit e o Write do `claude` CLI quando o Brito roda sobre a sua assinatura.
+- `/permissions` lista as regras; `/permissions allow bash(npm test:*)` grava no `.brito/settings.json`.
 
 ## Bancos de dados e outros recursos sensíveis
 
@@ -232,7 +271,7 @@ Os dados do projeto ficam em `.brito/` (grafo, skills do projeto, agentes) e os 
 ## Limitações
 
 - Software em fase inicial (v0.5.0), um mantenedor.
-- O app de desktop é novo: uma janela só (sem abas ainda) e, com chave de API (sem o `claude` CLI), o modelo não retoma a conversa ao reabrir o app, embora a tela a mostre.
+- O app de desktop é novo: uma janela só (sem abas ainda). Conversas do modo API feitas antes desta versão não são retomadas ao reabrir o app (as novas são, a partir de `.brito/sessions`).
 - **A interface e o idioma padrão do agente são português do Brasil.** Traduzi-los é uma contribuição bem-vinda.
 - O aprendizado de skills é heurístico: ele propõe, você decide. Espere rejeitar algumas propostas.
 

@@ -225,7 +225,7 @@ export class ClaudeSession {
   private args(text: string, imageDirs: string[] = []): string[] {
     const { root, approvalSock, stats, mcpCommand } = this.o;
     const mcp = mcpConfig(mcpCommand, approvalSock, perms.mode, this.o.env);
-    const readOnlyMcp = ["graph_search", "graph_callers", "graph_callees", "graph_impact", "graph_context", "graph_query", "graph_index", "remember", "recall", "skill_load"];
+    const readOnlyMcp = ["graph_search", "graph_callers", "graph_callees", "graph_impact", "graph_context", "graph_query", "graph_index", "remember", "recall", "skill_load", "digest"];
     const system = buildSystemPrompt(root, stats, skillsIndex(root)) +
       `\n\n# Nesta sessão\nAs tools do Brito chegam com o prefixo \`${MCP_PREFIX}\` (ex.: ${MCP_PREFIX}graph_context). Use-as como descrito acima. ` +
       `read_file/grep/glob/edit_file/bash correspondem a Read/Grep/Glob/Edit/Bash, e \`delegate\` corresponde à tool Agent/Task com os subagentes configurados (explore, plan, general e os do projeto).`;

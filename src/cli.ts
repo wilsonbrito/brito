@@ -7,7 +7,10 @@ import "./tools/bash.js";
 import "./tools/graph.js";
 import "./tools/delegate.js";
 import "./tools/plan.js";
+import "./tools/todo.js";
 import fs from "node:fs";
+import { randomUUID } from "node:crypto";
+import { latestSession, listSessions, repairHistory, saveSession, titleOf, type SavedSession } from "./agent/sessions.js";
 import { PLAN_NOTE, perms } from "./permissions.js";
 import { loadProjectAgents, listAgents } from "./agent/agents.js";
 import { GraphLockedError, GraphStore, openGraphAfterClaude } from "./graph/store.js";
@@ -15,21 +18,24 @@ import { indexProject } from "./graph/indexer.js";
 import { Agent } from "./agent/loop.js";
 import { EFFORTS, MODEL_ALIASES, modelHelp, effortLabel, initialEffort, initialModel, loadProfiles, isEffort, loadReasoningDisplay, parseModelArgs, saveEffort, saveModel, saveReasoningDisplay, type Effort, type ModelScope } from "./model.js";
 import { hasClaudeCli, historyForFallback, ClaudeSession } from "./agent/claude-cli.js";
-import { FALLBACK_PROFILE, NO_ANTHROPIC, fallbackStatus, learnerModel, openEngine } from "./engine.js";
+import { NO_ANTHROPIC, fallbackStatus, learnerModel, openEngine } from "./engine.js";
 import { activateFallback, chooseModel, cliShouldFallBack, fallbackWarning, newFallbackState, onceRestore, renderFallback, retryPrompt, type FallbackState } from "./provider/fallback.js";
 import { compactAtFor, contextWindowFor, resolveModel } from "./provider/resolve.js";
 import { startApprovalServer } from "./agent/approval.js";
+import { addRule, loadRules, projectSettingsPath } from "./rules.js";
 import { serveMcp } from "./mcp/server.js";
 import "./tools/skills.js";
+import "./tools/digest.js";
 import type { ToolContext } from "./tools/registry.js";
-import { approvePending, lintSkill, listPending, listSkills, rejectPending, skillsIndex, staleRefs } from "./skills/store.js";
+import { adviseSkill, approvePending, lintSkill, listBuiltins, listPending, listSkills, rejectPending, skillsIndex, staleRefs } from "./skills/store.js";
 import { applyProposal, autoConsolidate, describeProposal, proposeConsolidation, pruneCandidates, type Proposal } from "./skills/consolidate.js";
 import { defaultComplete, recordOutcomes, reflect, shouldReflect, type Complete } from "./skills/learn.js";
 import { expireTrials, skillsMode } from "./skills/trial.js";
 import { claudeCliComplete } from "./skills/learn-cli.js";
+import { pullModel, removeModel, slmStatus, withSlm } from "./local/slm.js";
 import type { TurnRecord } from "./agent/loop.js";
 import type { Msg } from "./provider/types.js";
-import { buildSystemPrompt, graphStatsLine } from "./agent/prompt.js";
+import { buildSystemPrompt, graphStatsLine, memoSystem, systemKey } from "./agent/prompt.js";
 import { allTools } from "./tools/registry.js";
 import { ui, c, fmtTokens } from "./ui/ui.js";
 import { runRepl, switchableBackend, type ReplBackend, type SwitchableBackend } from "./repl.js";
@@ -69,6 +75,45 @@ program
     const r = await migrateNotes(rootOf(o), (m) => console.log(m));
     if ("none" in r) console.log(r.none);
     else console.log(`OK: ${r.found} nota(s) no banco antigo, ${r.added} copiada(s), ${r.skipped} já existiam. O .brito/graph.kuzu foi mantido; apague-o quando quiser.`);
+  });
+
+program
+  .command("sessoes")
+  .alias("sessions")
+  .description("Lista as sessões salvas deste projeto (retome com brito --resume <id> ou brito -c)")
+  .option("-d, --dir <dir>", "raiz do projeto")
+  .action((o) => {
+    const lines = sessionLines(rootOf(o));
+    console.log(lines.length ? lines.join("\n") : c.muted("nenhuma sessão salva neste projeto"));
+  });
+
+program
+  .command("slm [acao]")
+  .description("SLM local embutido (llama.cpp): status | pull (baixa o modelo) | rm (apaga). Usado na reflexão de skills; desligue com BRITO_SLM=off")
+  .action(async (acao: string | undefined) => {
+    const st = await slmStatus();
+    if (acao === "pull") {
+      if (!st.lib) { console.error(c.err("node-llama-cpp não está instalado (dependência opcional). Rode: npm install node-llama-cpp")); process.exit(1); }
+      if (st.file) { console.log(c.ok("✦ ") + `modelo já baixado: ${st.file}`); return; }
+      console.log(`baixando ${st.uri} (alguns GB; é retomável com Ctrl+C e rodar de novo)…`);
+      let last = -1;
+      const file = await pullModel((done, total) => {
+        const pct = total ? Math.floor((done / total) * 100) : 0;
+        if (pct >= last + 5 || pct === 100) { last = pct; process.stdout.write(`\r${pct}% (${(done / 1e9).toFixed(2)}/${(total / 1e9).toFixed(2)} GB)`); }
+      });
+      console.log("\n" + c.ok("✦ ") + `pronto: ${file}`);
+      return;
+    }
+    if (acao === "rm") {
+      const f = await removeModel();
+      console.log(f ? c.ok("✦ ") + `removido: ${f}` : c.muted("nenhum modelo baixado"));
+      return;
+    }
+    if (acao && acao !== "status") { console.error(c.err("uso: brito slm [status|pull|rm]")); process.exit(1); }
+    console.log(`  modelo    ${st.uri}`);
+    console.log(`  biblioteca ${st.lib ? c.ok("node-llama-cpp ok") : c.warn("node-llama-cpp ausente (npm install node-llama-cpp)")}`);
+    console.log(`  arquivo   ${st.file ?? c.muted("não baixado: brito slm pull")}`);
+    console.log(`  estado    ${st.disabled ? c.warn("desligado (BRITO_SLM=off)") : st.ready ? c.ok("ativo: a reflexão de skills roda localmente") : c.muted("inativo")}`);
   });
 
 program
@@ -261,6 +306,28 @@ function modelCommand(get: () => string, set: (m: string) => void, note: string,
 }
 
 /** `/skills`: lista, revisa propostas pendentes e consolida a biblioteca. Vale para os dois backends. */
+/** `/permissions` lista as regras; `allow <regra>` / `deny <regra>` grava no `.brito/settings.json` do projeto. */
+const permissionsCommand = (root: string) => ({
+  desc: "regras de permissão; allow <regra> | deny <regra>",
+  run: async ([sub, ...rest]: string[]) => {
+    if (sub === "allow" || sub === "deny") {
+      const rule = rest.join(" ").trim();
+      if (!rule) { ui.print(c.muted(`  uso: /permissions ${sub} bash(npm test:*)  ·  /permissions ${sub} edit_file(src/**)`)); return; }
+      try { addRule(root, sub, rule); ui.info(`${sub}: ${rule} → ${path.relative(root, projectSettingsPath(root))}`); }
+      catch (e: any) { ui.error(e?.message ?? String(e)); }
+      return;
+    }
+    const r = loadRules(root);
+    if (!r.allow.length && !r.deny.length) {
+      ui.print(c.muted("  nenhuma regra. Ex.: /permissions allow bash(npm test:*)  ·  /permissions deny bash(git push:*)"));
+      return;
+    }
+    for (const a of r.allow) ui.print(`  ${c.soft("allow")} ${a}`);
+    for (const d of r.deny) ui.print(`  ${c.soft("deny ")} ${d}`);
+    ui.print(c.muted("  ~/.brito/settings.json · .brito/settings.json · .brito/settings.local.json"));
+  },
+});
+
 const skillsCommand = (root: string, io: { ask: (q: string, opts?: { force?: boolean }) => Promise<boolean> }, llm: { complete: Complete; model: () => string }) => ({
   desc: "lista skills; pending | approve <nome> | reject <nome> | consolidate",
   run: async ([sub, name]: string[]) => {
@@ -286,7 +353,7 @@ const skillsCommand = (root: string, io: { ask: (q: string, opts?: { force?: boo
           if (!p) { ui.warn(`sem proposta pendente: ${name}`); return; }
           ui.print(`  ${c.soft(p.name)} ${c.muted(`(${p.scope}) ${p.description}`)}\n${p.body.split("\n").map((l) => `  │ ${l}`).join("\n")}`);
           // Avisos do lint (ex.: comando destrutivo) ficam à vista de quem aprova, não só de quem propõe.
-          for (const w of lintSkill(p).warnings) ui.print(c.warn(`  ⚠ ${w}`));
+          for (const w of [...lintSkill(p).warnings, ...adviseSkill(p)]) ui.print(c.warn(`  ⚠ ${w}`));
           if (!(await io.ask(`aprovar a skill ${name}?`, { force: true }))) { ui.info("mantida como pendente"); return; }
           const r = approvePending(root, name);
           ui.print(c.ok("✦ ") + `skill ${name} ativa (${r.scope}, v${r.version})`);
@@ -306,8 +373,9 @@ const skillsCommand = (root: string, io: { ask: (q: string, opts?: { force?: boo
     const skills = listSkills(root);
     for (const s of skills) {
       const stale = staleRefs(root, s);
-      ui.print(`  ${c.soft(s.name)} ${c.muted(`(${s.scope}) v${s.version} · ${s.uses} usos${s.origin === "auto" ? ` · ${s.status === "trial" ? "em teste" : "automática"} ${s.wins}✓/${s.losses}✗` : ""} · último uso ${s.lastUsed} · ${s.description}`)}${stale.length ? " " + c.warn(`⚠ refs obsoletas: ${stale.join(", ")}`) : ""}`);
+      ui.print(`  ${c.soft(s.name)} ${c.muted(`(${s.scope}) v${s.version} · ${s.uses} usos${s.origin === "auto" ? ` · ${s.status === "trial" ? "em teste" : "automática"} ${s.wins}✓/${s.losses}✗` : ""}${s.invoke === "manual" ? " · manual (/" + s.name + ")" : ""}${s.model ? ` · modelo: ${s.model}` : ""}${s.lastLoss ? ` · último tropeço: ${s.lastLoss}` : ""} · último uso ${s.lastUsed} · ${s.description}`)}${stale.length ? " " + c.warn(`⚠ refs obsoletas: ${stale.join(", ")}`) : ""}`);
     }
+    for (const s of listBuiltins(root)) ui.print(`  ${c.soft("/" + s.name)} ${c.muted(`(embutida) ${s.description}`)}`);
     const prune = pruneCandidates(skills);
     if (prune.length) ui.info(`${prune.length} candidata(s) a poda (sem uso há mais de 30 dias): /skills consolidate`);
     if (pending.length) ui.info(`${pending.length} proposta(s) pendente(s): /skills pending`);
@@ -338,6 +406,35 @@ function makeLearner(getTurns: () => TurnRecord[], ctx: ToolContext, complete: C
   };
 }
 
+/** Linhas da listagem de sessões (`brito sessoes`, `/sessions`): id, quando, motor e título. */
+function sessionLines(root: string, current?: string): string[] {
+  return listSessions(root).slice(0, 20).map((s) => {
+    const when = s.updatedAt.slice(0, 16).replace("T", " ");
+    const mark = s.id === current ? c.accent(" ●") : "";
+    return `  ${c.soft(s.id.slice(0, 8))}  ${c.muted(when)}  ${c.dim(s.engine === "claude" ? "claude" : "api   ")}  ${s.title || c.dim("(sem título)")}${mark}`;
+  });
+}
+
+const sessionsCommand = (root: string, current: () => string | undefined) => ({
+  desc: "sessões salvas deste projeto (retome com brito --resume <id>)",
+  run: async () => {
+    const lines = sessionLines(root, current());
+    if (!lines.length) { ui.print(c.muted("  nenhuma sessão salva ainda")); return; }
+    for (const l of lines) ui.print(l);
+    ui.print(c.muted("  retome com: brito --resume <id>  ·  brito -c retoma a mais recente"));
+  },
+});
+
+/** `--resume` aceita o id inteiro ou o começo dele (como a listagem mostra). */
+function findSession(root: string, idOrPrefix: string): SavedSession | null {
+  const all = listSessions(root);
+  const exact = all.find((s) => s.id === idOrPrefix);
+  if (exact) return exact;
+  const hits = all.filter((s) => s.id.startsWith(idOrPrefix));
+  if (hits.length > 1) throw new Error(`o prefixo ${idOrPrefix} casa com ${hits.length} sessões; use mais caracteres`);
+  return hits[0] ?? null;
+}
+
 /** Como montar o modo API no meio da sessão (troca claude CLI → qwen); na abertura normal tudo fica no padrão. */
 interface ApiBackendOpts {
   /** estado do fallback da sessão (o da troca já vem ativo); padrão = novo, com `model` como principal */
@@ -354,6 +451,8 @@ interface ApiBackendOpts {
   graph?: GraphStore;
   /** `/model` para um modelo que roda no claude CLI: troca o motor e devolve true (ver `modelCommand`) */
   divert?: (m: string, scope: ModelScope) => Promise<boolean>;
+  /** sessão salva a retomar (`-c` / `--resume`): histórico, lista de tarefas e o mesmo id */
+  session?: SavedSession;
 }
 
 /**
@@ -373,24 +472,39 @@ async function buildApiBackend(root: string, model: string, io: { ask: (q: strin
 
   const ctx: ToolContext = { root, graph, ask: (q, opts) => io.ask(q, opts), sync, dirty: false, loadedSkills: o.loadedSkills ?? new Set() };
   const fallback = o.fallback ?? newFallbackState(model);
-  // Função: o índice de skills e a contagem do grafo são relidos a cada passo e refletem o que mudou na sessão.
-  const agent = new Agent(() => buildSystemPrompt(root, graphStatsLine(symCount, noteCount, "now"), skillsIndex(root)) + (perms.mode === "plan" ? PLAN_NOTE : ""), ctx, { model, fallback });
+  // Refeito só quando muda o modo plano, o grafo deixa de estar vazio ou o conjunto de skills muda: um system
+  // estável mantém o cache de prompt da conversa (veja memoSystem).
+  const system = memoSystem(
+    () => systemKey(root, perms.mode === "plan", symCount + noteCount === 0),
+    () => buildSystemPrompt(root, graphStatsLine(symCount, noteCount, "now"), skillsIndex(root)) + (perms.mode === "plan" ? PLAN_NOTE : ""),
+  );
+  const agent = new Agent(system, ctx, { model, fallback });
   if (o.messages) agent.messages = o.messages;
   if (o.effort) agent.effort = o.effort as Effort;
+  let sessionId = o.session?.id ?? randomUUID();
+  if (o.session?.messages) agent.messages = repairHistory(o.session.messages);
+  if (o.session?.todos) ctx.todos = o.session.todos;
   ctx.model = () => agent.model; // subagentes seguem o modelo vivo
   ui.reasoning = loadReasoningDisplay();
   const learnModel = () => learnerModel(agent.model, process.env);
   loadProjectAgents(root);
 
   /** Depois de tarefas complexas (ou uso de skill), propõe criar/melhorar skills. */
-  const learn = makeLearner(() => agent.recentTurns, ctx, defaultComplete, learnModel);
+  const learn = makeLearner(() => agent.recentTurns, ctx, withSlm(defaultComplete), learnModel);
+
+  /** Grava a conversa a cada turno (também nos que falharam): `brito -c` retoma de onde parou. */
+  const persist = () => {
+    if (!agent.messages.length) return;
+    try { saveSession(root, { id: sessionId, engine: "api", model: agent.model, title: titleOf(agent.messages), messages: agent.messages, todos: ctx.todos }); }
+    catch (e: any) { ui.warn(`não consegui salvar a sessão: ${e?.message ?? e}`); }
+  };
 
   const turn = async (text: string, signal: AbortSignal) => {
     ui.turnStart();
     let ok = true;
     try { await agent.send(text, signal); }
     catch (e: any) { ok = false; signal.aborted ? ui.warn("⏹ interrompido") : ui.error(e?.message ?? String(e)); }
-    finally { ui.turnEnd(ok); }
+    finally { ui.turnEnd(ok); persist(); }
     return ok;
   };
 
@@ -401,13 +515,15 @@ async function buildApiBackend(root: string, model: string, io: { ask: (q: strin
   const modelCmd = modelCommand(() => agent.model, (m) => { agent.model = m; chooseModel(fallback, m); }, "(troque com /model; subagentes explore usam BRITO_EXPLORE_MODEL)", noApiKey, o.divert);
   const backend: ReplBackend = {
     model: () => agent.model,
+    fallback: () => fallback,
     contextTokens: () => agent.contextTokens,
     usage: () => agent.usage,
     get ctxWindow() { return contextWindowFor(agent.model); },
     cost: () => (Number.isFinite(PRICE_IN) && Number.isFinite(PRICE_OUT) ? (agent.usage.input * PRICE_IN + agent.usage.output * PRICE_OUT) / 1e6 : undefined),
     turn,
     afterTurn: async () => { modelCmd.restoreOnce(fallback.active); await learn(); },
-    reset: () => { agent.messages = []; agent.contextTokens = 0; agent.recentTurns = []; agent.unsentTurns = []; agent.lastTurn = null; },
+    // `/clear` começa outra sessão: a anterior continua salva e pode ser retomada com --resume.
+    reset: () => { agent.messages = []; agent.contextTokens = 0; agent.recentTurns = []; agent.unsentTurns = []; agent.lastTurn = null; ctx.todos = undefined; sessionId = randomUUID(); },
     onShell: () => { ctx.dirty = true; }, // `!cmd` pode ter mudado o código
     commands: {
       "/model": modelCmd.cmd,
@@ -424,11 +540,14 @@ async function buildApiBackend(root: string, model: string, io: { ask: (q: strin
       },
       "/index": { desc: "reconstrói o grafo do zero", run: async () => { ui.info("reconstruindo grafo…"); ui.print(c.muted(JSON.stringify(await indexProject(root, graph, { full: true })))); } },
       "/learn": { desc: "extrai skills do último turno agora", run: async () => { await learn(true); } },
-      "/skills": skillsCommand(root, io, { complete: defaultComplete, model: learnModel }),
+      "/skills": skillsCommand(root, io, { complete: withSlm(defaultComplete), model: learnModel }),
+      "/permissions": permissionsCommand(root),
+      "/todos": { desc: "lista de tarefas da sessão", run: async () => { ctx.todos?.length ? ui.printTodos(ctx.todos) : ui.print(c.muted("  sem lista de tarefas nesta sessão")); } },
+      "/sessions": sessionsCommand(root, () => sessionId),
     },
     close: async () => { await graph.close(); },
   };
-  return { backend, agent, graph, learn, symbols: () => symCount, notes: noteCount };
+  return { backend, agent, graph, learn, symbols: () => symCount, notes: noteCount, sessionId: () => sessionId };
 }
 
 /** `--once` não troca de motor: o turno seguinte rodaria no outro motor e a volta exigiria trocar de novo. */
@@ -444,8 +563,8 @@ let approvalServer: ReturnType<typeof startApprovalServer> | null = null;
  * Motor claude CLI. `sw` é o backend do REPL: `/model <perfil>` troca para o modo API (com a conversa do claude) e
  * `/model <claude>` lá volta para cá. Também serve ao prompt único, que não troca de motor pelo `/model`.
  */
-async function buildClaudeBackend(root: string, io: Io, sw: () => SwitchableBackend, model?: string, openGraph?: GraphStore) {
-  approvalServer ??= startApprovalServer({ ask: (q, opts) => io.ask(q, opts) });
+async function buildClaudeBackend(root: string, io: Io, sw: () => SwitchableBackend, model?: string, openGraph?: GraphStore, resume?: SavedSession) {
+  approvalServer ??= startApprovalServer({ ask: (q, opts) => io.ask(q, opts) }, root);
   // O banco aceita um único processo com acesso de escrita: indexa, lê as stats e solta o banco para o servidor MCP.
   // `openGraph`: o do modo API, que é fechado aqui só depois de indexar (se falhar antes, continua aberto para ele).
   const graph = openGraph ?? await GraphStore.open(root);
@@ -461,10 +580,19 @@ async function buildClaudeBackend(root: string, io: Io, sw: () => SwitchableBack
     mcpCommand: { command: process.execPath, args: [...process.execArgv, process.argv[1], "mcp-serve", "-d", root] },
   });
   loadProjectAgents(root);
+  if (resume) session.resume(resume.id);
+
+  // Só o id fica aqui: a conversa em si o claude CLI guarda, e o `--resume` dele a recupera.
+  let title = resume?.title ?? "";
+  const persist = (text: string) => {
+    title ||= text.replace(/\s+/g, " ").trim().slice(0, 80);
+    try { saveSession(root, { id: session.sessionId, engine: "claude", model: session.model, title }); }
+    catch (e: any) { ui.warn(`não consegui salvar a sessão: ${e?.message ?? e}`); }
+  };
 
   // O grafo já foi solto para o servidor MCP; skill_save só usa o store de skills, então `graph` não é tocado.
   const learnCtx: ToolContext = { root, graph: undefined as unknown as GraphStore, ask: (q, opts) => io.ask(q, opts), sync: async () => {}, dirty: false, loadedSkills: session.loadedSkills };
-  const learn = makeLearner(() => session.recentTurns, learnCtx, claudeCliComplete, () => process.env.BRITO_LEARN_MODEL ?? ""); // "" = modelo padrão do claude
+  const learn = makeLearner(() => session.recentTurns, learnCtx, withSlm(claudeCliComplete), () => process.env.BRITO_LEARN_MODEL ?? ""); // "" = modelo padrão do claude
 
   if (model) { session.requestedModel = resolveModel(model).wireModel; session.model = session.requestedModel; }
   session.effort = initialEffort();
@@ -503,7 +631,7 @@ async function buildClaudeBackend(root: string, io: Io, sw: () => SwitchableBack
     ui.warn(fallbackWarning(f.kind, f.message, status.label));
     const api = await openApi(status.name, status.label, { engineLabel: () => "claude CLI · assinatura" });
     if (!api) return null;
-    activateFallback(fallback, `${f.kind} (${f.message})`);
+    activateFallback(fallback, `${f.kind} (${f.message})`, Date.now(), undefined, status.name);
     return { api, retry: () => api.backend.turn(retryPrompt(text), signal) };
   };
 
@@ -529,12 +657,15 @@ async function buildClaudeBackend(root: string, io: Io, sw: () => SwitchableBack
   const mcpTools = allTools().map((t) => t.name).filter((n) => /^(graph_|skill_)/.test(n) || n === "remember" || n === "recall");
   const backend: ReplBackend = {
     model: () => session.model,
+    fallback: () => fallback,
     contextTokens: () => session.contextTokens,
     usage: () => session.usage,
     cost: () => (session.costUsd > 0 ? session.costUsd : undefined),
     get ctxWindow() { return session.contextWindow ?? CTX_WINDOW; },
     turn: async (text, signal) => {
-      if (await session.send(text)) return true;
+      const ok = await session.send(text);
+      persist(text);
+      if (ok) return true;
       const fb = await switchToQwen(text, signal);
       if (!fb) return false;
       modelCmd.restoreOnce(true); // um `--once` pendente voltaria ao Claude que acabou de cair
@@ -543,7 +674,7 @@ async function buildClaudeBackend(root: string, io: Io, sw: () => SwitchableBack
     },
     afterTurn: async () => { modelCmd.restoreOnce(); await learn(); },
     abort: () => session.abort(),
-    reset: () => session.reset(),
+    reset: () => { session.reset(); title = ""; },
     commands: {
       "/model": modelCmd.cmd,
       "/fallback": fallbackCommand(fallback, () => session.model, () => "claude CLI · assinatura"),
@@ -561,21 +692,23 @@ async function buildClaudeBackend(root: string, io: Io, sw: () => SwitchableBack
       },
       "/context": unavailable,
       "/learn": { desc: "extrai skills do último turno agora", run: async () => { await learn(true); } },
-      "/skills": skillsCommand(root, io, { complete: claudeCliComplete, model: () => process.env.BRITO_LEARN_MODEL ?? "" }),
+      "/skills": skillsCommand(root, io, { complete: withSlm(claudeCliComplete), model: () => process.env.BRITO_LEARN_MODEL ?? "" }),
+      "/permissions": permissionsCommand(root),
+      "/sessions": sessionsCommand(root, () => session.sessionId),
     },
     close: async () => {},
   };
   return { backend, session, learn, switchToQwen, modelCmd, syms: Number(syms), notes: Number(notes), mcpTools };
 }
 
-async function runViaClaude(root: string, promptParts: string[], yes: boolean, model?: string) {
+async function runViaClaude(root: string, promptParts: string[], yes: boolean, model?: string, resume?: SavedSession) {
   const startedAt = Date.now();
   if (yes) perms.mode = "bypass";
   // O REPL troca `io.ask`; em prompt único cai na pergunta simples.
   const io: Io = { ask: async (q: string, _opts?: { force?: boolean }): Promise<boolean> => perms.mode === "bypass" || plainAsk(q) };
   { const { offerNoteMigration } = await import("./graph/migrate.js"); await offerNoteMigration(root, (q) => migrationAsk(q), (m) => ui.info(m)); }
   let sw!: SwitchableBackend;
-  const claude = await buildClaudeBackend(root, io, () => sw, model);
+  const claude = await buildClaudeBackend(root, io, () => sw, model, undefined, resume);
 
   if (promptParts.length) {
     const text = promptParts.join(" ");
@@ -604,16 +737,36 @@ program
   .option("-d, --dir <dir>", "raiz do projeto")
   .option("-y, --yes", "aprovar edições e comandos automaticamente")
   .option("-m, --model <nome>", "modelo ou perfil de endpoint (ex.: sonnet, qwen)")
+  .option("-c, --continue", "retoma a sessão mais recente deste projeto")
+  .option("-r, --resume <id>", "retoma uma sessão salva (id ou começo dele; veja `brito sessoes`)")
   .action(async (promptParts: string[], o) => {
     // Trava anti-recursão: um brito iniciado por dentro de um claude que o próprio brito lançou (BRITO_DEPTH) pode abrir
     // outro claude, e assim por diante. Dois níveis bastam; mais que isso é laço de processos.
     if (Number(process.env.BRITO_DEPTH ?? 0) >= 2) { console.error("brito aninhado demais (BRITO_DEPTH): abortando para evitar laço de processos."); process.exit(1); }
     for (const e of loadProfiles().errors) ui.warn(e);
-    const startModel: string = o.model ?? initialModel();
+    let resume: SavedSession | null = null;
+    if (o.resume || o.continue) {
+      try { resume = o.resume ? findSession(rootOf(o), o.resume) : latestSession(rootOf(o)); }
+      catch (e: any) { console.error(c.err(e?.message ?? String(e))); process.exit(1); }
+      if (!resume) { console.error(c.err(o.resume ? `sessão não encontrada: ${o.resume} (veja \`brito sessoes\`)` : "nenhuma sessão salva neste projeto")); process.exit(1); }
+    }
+    const startModel: string = o.model ?? (resume?.engine === "api" ? resume.model : undefined) ?? initialModel();
     const engine = openEngine(startModel, process.env, hasClaudeCli);
     if (engine.kind === "error") { console.error(c.err(engine.message)); process.exit(1); }
+    // A sessão é retomada no motor que a gravou: a conversa de uma está guardada onde a outra não alcança.
+    if (resume?.engine === "claude") {
+      if (!hasClaudeCli()) { console.error(c.err("esta sessão foi feita no claude CLI, que não está instalado aqui")); process.exit(1); }
+      ui.info(`retomando: ${resume.title || resume.id}`);
+      await runViaClaude(rootOf(o), promptParts, !!o.yes, o.model, resume);
+      return;
+    }
+    if (resume && engine.kind === "claude") {
+      console.error(c.err(`esta sessão foi feita no modo API (${resume.model}); sem ANTHROPIC_API_KEY ela só abre num perfil de endpoint: brito --resume ${resume.id.slice(0, 8)} --model qwen`));
+      process.exit(1);
+    }
     if (engine.kind === "claude") { await runViaClaude(rootOf(o), promptParts, !!o.yes, o.model); return; }
     const root = rootOf(o);
+    if (resume) ui.info(`retomando: ${resume.title || resume.id} (${resume.messages?.length ?? 0} mensagens)`);
     const startedAt = Date.now();
     { const { offerNoteMigration } = await import("./graph/migrate.js"); await offerNoteMigration(root, (q) => migrationAsk(q), (m) => ui.info(m)); }
 
@@ -621,12 +774,12 @@ program
     if (o.yes) perms.mode = "bypass";
     const io = { ask: async (q: string, _opts?: { force?: boolean }) => perms.mode === "bypass" || plainAsk(q) };
     // Claude sem conta nenhuma, com o fallback pronto: a sessão já nasce no qwen (com aviso, nunca em silêncio).
-    let opening: ApiBackendOpts = {};
+    let opening: ApiBackendOpts = resume ? { session: resume } : {};
     if (engine.kind === "fallback") {
       ui.warn(`⚠ ${NO_ANTHROPIC} (sem ANTHROPIC_API_KEY e sem o claude CLI) — abrindo no ${engine.label}. /fallback para detalhes.`);
       const fallback = newFallbackState(startModel);
-      activateFallback(fallback, NO_ANTHROPIC);
-      opening = { fallback, engineLabel: () => NO_ANTHROPIC };
+      activateFallback(fallback, NO_ANTHROPIC, Date.now(), undefined, engine.name);
+      opening = { ...opening, fallback, engineLabel: () => NO_ANTHROPIC };
     }
     let sw!: SwitchableBackend;
     // Sem ANTHROPIC_API_KEY o Claude só roda no claude CLI: `/model <claude>` troca o motor em vez de recusar.
@@ -646,7 +799,7 @@ program
       await claude.modelCmd.cmd.run([m, `--${scope}`]);
       return true;
     };
-    const api = await buildApiBackend(root, engine.kind === "fallback" ? FALLBACK_PROFILE : startModel, io, opening);
+    const api = await buildApiBackend(root, engine.kind === "fallback" ? engine.name : startModel, io, opening);
 
     if (promptParts.length) {
       if (await api.backend.turn(promptParts.join(" "), new AbortController().signal)) await api.learn();

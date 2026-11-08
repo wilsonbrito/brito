@@ -1,6 +1,7 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("brito", {
+  pathOf: (file) => { try { return webUtils.getPathForFile(file); } catch { return ""; } },
   load: () => ipcRenderer.invoke("store:load"),
   save: (state) => ipcRenderer.invoke("store:save", state),
   pickFolder: () => ipcRenderer.invoke("pickFolder"),

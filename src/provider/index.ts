@@ -1,4 +1,5 @@
 import { AnthropicProvider } from "./anthropic.js";
+import { LocalSlmProvider } from "./local.js";
 import { OpenAICompatProvider } from "./openai-compat.js";
 import { resolveModel } from "./resolve.js";
 import type { ModelProvider, ResolvedModel } from "./types.js";
@@ -8,6 +9,7 @@ let factory: ((r: ResolvedModel) => ModelProvider) | null = null;
 export function setProviderFactory(f: ((r: ResolvedModel) => ModelProvider) | null): void { factory = f; }
 
 let anthropic: AnthropicProvider | undefined;
+let local: LocalSlmProvider | undefined;
 const openai = new Map<string, { key: string; provider: OpenAICompatProvider }>();
 
 /**
@@ -18,6 +20,7 @@ export function providerFor(name: string): ModelProvider {
   const r = resolveModel(name);
   if (factory) return factory(r);
   if (r.kind === "anthropic") return (anthropic ??= new AnthropicProvider());
+  if (r.local) return (local ??= new LocalSlmProvider());
   // O config pode mudar na sessão: refaz o provedor quando o perfil muda.
   const key = JSON.stringify(r.profile);
   const hit = openai.get(r.name);

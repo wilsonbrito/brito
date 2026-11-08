@@ -18,7 +18,7 @@ Brito is an agent for software development. Use it in the terminal (`brito-cli` 
 - **Wide coverage.** TypeScript/JavaScript, Python and the script blocks of `.svelte`, `.vue` and `.astro` components. Import aliases (`tsconfig` paths, `package.json` imports, SvelteKit's `$lib`) become real edges. Files ignored by `.gitignore` stay out.
 - **Skills that learn on their own, on probation.** After a task that tripped or was corrected, Brito reflects and creates a skill *in trial* without interrupting you. A skill proves itself by use: 3 clean uses promote it, 2 stumbles archive it (recoverable). Anything risky, or any change to a skill you approved, still waits for your `/skills approve`. `BRITO_SKILLS=ask` restores approval-for-everything; `off` disables learning.
 - **Safety rails for what gets learned.** A lint rejects secrets, credentials embedded in URLs, `curl | sh` and prompt-injection phrasing, and **warns about destructive commands** (see below).
-- **Permission modes.** manual, auto-edits, plan and "everything allowed" (`Shift+Tab` cycles them). Autonomous skills do not depend on the mode: they are created in trial and judged by results.
+- **Permission modes and rules.** manual, auto-edits, plan and "everything allowed" (`Shift+Tab` cycles them), plus `allow`/`deny` rules per command or path (see [Permission rules](#permission-rules)). Editing a file requires having read it in the session, unchanged since. Autonomous skills do not depend on the mode: they are created in trial and judged by results.
 - **Two backends, one interface.** Use an Anthropic API key, or your Claude Code subscription through the `claude` CLI. Brito never reads or sends your subscription token.
 - **Terminal or desktop app.** `npm i -g brito-cli` gives you the `brito` command; the desktop app is a native executable with a window (projects and sessions in a sidebar, chat, permission prompts), no Node or terminal needed. See [Install](#install).
 - **Images.** Drag an image file into the prompt (or paste its path) and it is attached to the turn: PNG, JPEG, GIF or WebP, up to 5 MB.
@@ -72,6 +72,17 @@ flowchart LR
 4. A skill can be project-scoped or **global** (valid in every project); `/skills promote` moves one to global.
 
 The lint **rejects** secrets/tokens, absolute user paths, credentials in URLs (`user:password@host`), `curl | sh`, and instructions to override rules or skip approval. It **warns** (without blocking) about commands that destroy data: removing database or data files, `DROP`/`TRUNCATE`, `DELETE` without `WHERE`, migration resets, `git reset --hard`, force-push, Docker volume removal. A skill is a standing instruction, so a step that was only safe in the state of one moment must not silently become the default.
+
+## Local model (optional)
+
+`brito slm pull` downloads a small local model (Qwen3-4B-Instruct-2507 Q4_K_M, Apache-2.0) to `~/.brito/models` through the optional `node-llama-cpp` dependency. `brito slm` shows the status and `brito slm rm` deletes it. Once downloaded it is used for:
+
+- **Skill learning**: the reflection runs locally with grammar-constrained JSON and falls back to the usual model on any failure.
+- **`digest` tool**: a scout and refiner for long texts. The local model picks the blocks most related to your objective and proposes excerpts; code then checks every quote against the source and drops what is not there, so the main model gets a small markdown draft with verified quotes and page numbers.
+
+- **Fallback when Claude runs out**: chain Claude → `qwen` profile → local SLM, with the full agent loop and tools (same permissions). It is temporary: after a window (the reset time reported by the error, else 10 min, or 60 min for quota/auth; `BRITO_FALLBACK_MINUTES` overrides) the next turn tries Claude again. `/fallback` shows when. A 4B model errs more with tools: use it to keep going, not for big tasks. `BRITO_SLM_FALLBACK=off` removes it from the chain; `BRITO_SLM_CTX` sets its context.
+
+`BRITO_SLM=off` disables it; `BRITO_SLM_MODEL` points to another GGUF (`hf:` URI or file path).
 
 ## Install
 
@@ -130,6 +141,9 @@ cd your-project
 brito                       # opens the REPL
 brito "who calls parseConfig?"   # single prompt, no REPL
 brito index                 # (re)index the graph; it is also kept up to date automatically
+brito -c                    # resume the most recent session in this project
+brito sessions              # list saved sessions; resume one with brito --resume <id>
+brito slm pull              # (optional) download the local model used by digest and skill learning
 brito query "MATCH (c:Symbol {kind:'component'})-[:CALLS]->(f:Symbol) RETURN c.file, f.name LIMIT 5"
 ```
 
@@ -150,10 +164,15 @@ OK: 20 arquivos, 66 símbolos, 54 chamadas, 17 imports | +0 ~0 -0 =20 (28ms)
 | `/fallback` | shows the main model and the fallback (qwen), and whether the switch already happened |
 | `/modo` or `Shift+Tab` | switch permission mode: manual → auto-edits → plan → bypass ("everything allowed") |
 | `/skills` | list skills · `pending` · `approve <name>` · `reject <name>` · `consolidate` · `rm <name>` · `promote <name>` |
+| `/permissions` | list permission rules · `allow <rule>` · `deny <rule>` |
 | `/learn` | extract skills from the last turn now |
+| `/grill-me`, `/grill-with-docs`, `/wayfinder`, `/grill-diff` | built-in manual skills: interview you until the idea is firm (`--um` = one question per message), also save decisions with `remember`, map big work and delegate, question the current diff |
+| `/skills suggest <task>` | rank skills (built-ins included) by relevance to a task |
 | `/agents`, `/tools`, `/index`, `/context` | inspect subagents, tools, the index and the context window |
 | `!command` | run a shell command directly, without calling the model |
-| `/clear`, `/exit` | clear the conversation, quit |
+| `/todos` | show the session's task list (the agent keeps it with `todo_write` on multi-step tasks) |
+| `/sessions` | list this project's saved sessions |
+| `/clear`, `/exit` | start another conversation (the previous one stays saved), quit |
 
 ## What the graph indexes
 
@@ -162,6 +181,26 @@ OK: 20 arquivos, 66 símbolos, 54 chamadas, 17 imports | +0 ~0 -0 =20 (28ms)
 - **Imports:** relative and aliased. Resolves `paths`/`baseUrl` from `tsconfig.json`/`jsconfig.json` (following relative `extends`, like `.svelte-kit/tsconfig.json`), `package.json` `imports` (`#internal/*`) and SvelteKit's `$lib`. Configuration applies per file (nearest config), so monorepos work; editing a tsconfig re-indexes the affected files.
 - **Backend languages:** the graph holds classes/interfaces/structs/traits/enums/modules, functions and methods (`Class.method`), calls and imports. Imports name a package, not a path, so Brito matches them against the end of your files' paths (`com.acme.Repo` ↔ `src/main/java/com/acme/Repo.java`; PHP PSR-4 namespaces; Rust `use crate::…`; Ruby `require`/`require_relative`; Go packages through the `go.mod` module path). External packages (`java.util`, `serde`, `github.com/gin-gonic/gin`) never match and create no edges. There is no type inference: a call like `userRepository.save()` is linked by matching the receiver name to a type in the project (`UserRepository`), `this`/`self`/receivers resolve to the enclosing class, and a bare call inside a class tries the class's own methods first.
 - **Not yet:** `extends` by package (`@tsconfig/node20`), sibling-workspace `exports`, and function references without a call in a template (`onclick={fn}`). Calls are resolved statically with name-based fallbacks, so dynamic dispatch and reflection are not captured.
+
+## Permission rules
+
+To stop approving the same command every time (without resorting to "everything allowed"), declare rules in `.brito/settings.json` (per project, can be committed), `.brito/settings.local.json` (just you) or `~/.brito/settings.json` (all projects). The lists add up.
+
+```json
+{
+  "permissions": {
+    "allow": ["bash(npm test:*)", "bash(npm run typecheck)", "bash(git status:*)", "edit_file(src/**)"],
+    "deny": ["bash(git push:*)", "bash(rm -rf*)", "read_file(.env*)"]
+  }
+}
+```
+
+- `tool` matches any use; `tool(pattern)` narrows it. In `bash`, `*` matches anything and a trailing `:*` matches the prefix alone or followed by arguments (`git status:*` allows `git status --short`, not `git statusx`). In paths, `*` does not cross directories and `**` does.
+- **`allow` skips the prompt** in manual and auto-edits modes. Plan mode still blocks.
+- **`deny` always blocks**, even in "everything allowed".
+- A compound command is allowed only if **every piece** (`&&`, `||`, `;`, `|`) matches a rule: `bash(npm test*)` does not allow `npm test && rm -rf ~`. Commands with `$(...)`, backticks or redirection to a file are never allowed by a rule; `2>&1` and `> /dev/null` are fine.
+- The rules also apply to the `claude` CLI's Bash, Edit and Write when Brito runs on your subscription.
+- `/permissions` lists the rules; `/permissions allow bash(npm test:*)` writes to `.brito/settings.json`.
 
 ## Databases and other sensitive resources
 
@@ -229,7 +268,7 @@ Project data lives in `.brito/` (graph, project skills, agents) and global data 
 ## Limitations
 
 - Early software (v0.5.0), one maintainer.
-- The desktop app is new: a single window (no tabs yet), and with an API key (no `claude` CLI) the model does not resume a conversation after you reopen the app, although the screen shows it.
+- The desktop app is new: a single window (no tabs yet). API-mode conversations from before this version are not resumed when you reopen the app (new ones are, from `.brito/sessions`).
 - **The interface and the agent's default language are Brazilian Portuguese.** Translating them is a welcome contribution.
 - Skill learning is a heuristic: it proposes, you decide. Expect some proposals to be rejected.
 

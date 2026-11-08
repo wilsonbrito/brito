@@ -2,12 +2,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseFrontmatter, stringifyFrontmatter } from "../util/frontmatter.js";
+import { BUILTIN_SKILLS } from "./builtin.js";
 
 export type Scope = "project" | "global";
 
 /** `trial` = hipótese criada sozinha, ainda sem evidência; `active` = confiável (aprovada por humano ou promovida pelos resultados). */
 export type SkillStatus = "trial" | "active";
 export type SkillOrigin = "manual" | "auto";
+/** `manual` = só roda quando o usuário digita `/nome`; fica fora do índice do system prompt. */
+export type SkillInvoke = "auto" | "manual";
 
 export interface Skill {
   name: string;
@@ -30,9 +33,16 @@ export interface Skill {
   body: string;
   /** derivado do diretório onde o arquivo está */
   scope: Scope;
+  invoke: SkillInvoke;
+  /** modelo recomendado (dica exibida em skill_load e /skills; não troca o modelo sozinho) */
+  model: string;
+  /** o que deu errado no último turno com tropeço (alimenta a reflexão e o skill_load) */
+  lastLoss: string;
+  /** skill embutida no Brito (somente leitura; um arquivo em disco com o mesmo nome a sobrepõe) */
+  builtin?: boolean;
 }
 
-export interface SkillInput { name: string; description: string; body: string; refs?: string[] }
+export interface SkillInput { name: string; description: string; body: string; refs?: string[]; invoke?: SkillInvoke; model?: string }
 
 export const NAME_RE = /^[a-z0-9][a-z0-9-]{1,48}$/;
 const today = () => new Date().toISOString().slice(0, 10);
@@ -61,6 +71,9 @@ function parse(text: string, scope: Scope): Skill | null {
     losses: Number(meta.losses) || 0,
     body: body.trim(),
     scope,
+    invoke: meta.invoke === "manual" ? "manual" : "auto",
+    model: meta.model ?? "",
+    lastLoss: meta.lastLoss ?? "",
   };
 }
 
@@ -69,7 +82,7 @@ export function writeSkill(root: string, s: Skill) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(
     file,
-    stringifyFrontmatter({ name: s.name, description: s.description, version: s.version, uses: s.uses, created: s.created, updated: s.updated, lastUsed: s.lastUsed, refs: s.refs.join(", "), status: s.status, origin: s.origin, wins: s.wins, losses: s.losses }, s.body),
+    stringifyFrontmatter({ name: s.name, description: s.description, version: s.version, uses: s.uses, created: s.created, updated: s.updated, lastUsed: s.lastUsed, refs: s.refs.join(", "), status: s.status, origin: s.origin, wins: s.wins, losses: s.losses, ...(s.invoke === "manual" ? { invoke: "manual" } : {}), ...(s.model ? { model: s.model } : {}), ...(s.lastLoss ? { lastLoss: s.lastLoss } : {}) }, s.body),
   );
 }
 
@@ -81,7 +94,20 @@ export function getSkillIn(root: string, name: string, scope: Scope): Skill | nu
 
 /** Resolve por nome: a skill do projeto sobrepõe a global de mesmo nome. */
 export function getSkill(root: string, name: string): Skill | null {
-  return getSkillIn(root, name, "project") ?? getSkillIn(root, name, "global");
+  return getSkillIn(root, name, "project") ?? getSkillIn(root, name, "global") ?? getBuiltin(name);
+}
+
+/** Skills embutidas: disponíveis em qualquer projeto sem gravar nada em disco. */
+export function getBuiltin(name: string): Skill | null {
+  const b = BUILTIN_SKILLS.find((x) => x.name === name);
+  if (!b) return null;
+  const d = "2026-11-07";
+  return { name: b.name, description: b.description, version: 1, uses: 0, created: d, updated: d, lastUsed: d, refs: [], status: "active", origin: "manual", wins: 0, losses: 0, body: b.body, scope: "global", invoke: "manual", model: b.model ?? "", lastLoss: "", builtin: true };
+}
+
+/** Embutidas ainda não sobrepostas por uma skill do usuário. */
+export function listBuiltins(root: string): Skill[] {
+  return BUILTIN_SKILLS.flatMap((b) => (getSkillIn(root, b.name, "project") ?? getSkillIn(root, b.name, "global") ? [] : [getBuiltin(b.name)!]));
 }
 
 function listScope(root: string, scope: Scope): Skill[] {
@@ -160,6 +186,17 @@ export function lintSkill(input: SkillInput): { errors: string[]; warnings: stri
   return { errors, warnings: [...urls, ...destructive] };
 }
 
+/** Limite suave: skills longas pioram a qualidade do agente ("dumb zone"); acima disso, sugerimos dividir. */
+export const SOFT_BODY_LIMIT = 3000;
+
+/** Dicas de qualidade (não bloqueiam nem entram em `lintSkill`): tamanho e critério de término/verificação. */
+export function adviseSkill(input: SkillInput): string[] {
+  const tips: string[] = [];
+  if (input.body.length > SOFT_BODY_LIMIT) tips.push(`body com ${input.body.length} chars (> ${SOFT_BODY_LIMIT}): considere dividir em skills menores`);
+  if (!/verifica|crit[ée]rio de (t[ée]rmino|sa[ií]da|pronto)|done when|pronto quando/i.test(input.body)) tips.push("sem seção '## Verificação' ou critério de término: diga como saber que acabou");
+  return tips;
+}
+
 export function validate(input: SkillInput) {
   if (!NAME_RE.test(input.name)) throw new Error("name deve ser kebab-case (a-z, 0-9, hífen), 2–49 chars.");
   if (input.description.length < 10 || input.description.length > 200) throw new Error("description deve ter 10–200 chars e dizer QUANDO usar a skill.");
@@ -203,6 +240,9 @@ export function saveSkill(root: string, input: SkillInput, scope?: Scope, opts: 
     losses: opts.auto && prev?.status === "trial" ? 0 : prev?.losses ?? 0,
     body: input.body.trim(),
     scope: target,
+    invoke: input.invoke ?? prev?.invoke ?? "auto",
+    model: input.model ?? prev?.model ?? "",
+    lastLoss: prev?.lastLoss ?? "",
   };
   writeSkill(root, skill);
   return { created: !prev, version: skill.version, scope: target };
@@ -256,13 +296,13 @@ export function rejectPending(root: string, name: string): boolean {
 
 export function bumpUses(root: string, name: string) {
   const s = getSkill(root, name);
-  if (s) writeSkill(root, { ...s, uses: s.uses + 1, lastUsed: today() });
+  if (s && !s.builtin) writeSkill(root, { ...s, uses: s.uses + 1, lastUsed: today() });
 }
 
 /** Move para `.trash` do próprio escopo em vez de apagar. */
 export function deleteSkill(root: string, name: string, scope?: Scope): boolean {
   const s = scope ? getSkillIn(root, name, scope) : getSkill(root, name);
-  if (!s) return false;
+  if (!s || s.builtin) return false;
   const base = dirOf(root, s.scope);
   fs.mkdirSync(path.join(base, ".trash"), { recursive: true });
   fs.renameSync(path.join(base, name), path.join(base, ".trash", `${name}-${Date.now()}`));
@@ -279,8 +319,34 @@ export function promoteSkill(root: string, name: string): void {
   fs.renameSync(path.join(dirOf(root, "project"), name), dest);
 }
 
-/** Índice compacto para o system prompt (divulgação progressiva: o corpo só entra via skill_load). */
-export function skillsIndex(root: string, max = 40, now = Date.now()): string {
-  const all = listSkills(root, now).slice(0, max);
-  return all.length ? all.map((s) => `- ${s.name}${s.scope === "global" ? " (global)" : ""}${s.status === "trial" ? " (em teste)" : ""}${staleRefs(root, s).length ? " [refs obsoletas]" : ""}: ${s.description}`).join("\n") : "";
+/** Quantas skills vão para o índice do system prompt; o resto é achado por `skill_load` (sugestões) ou `/skills suggest`. */
+export const INDEX_MAX = 25;
+
+/** Índice compacto para o system prompt (divulgação progressiva: o corpo só entra via skill_load). Skills `manual` ficam de fora. */
+export function skillsIndex(root: string, max = INDEX_MAX, now = Date.now()): string {
+  const eligible = listSkills(root, now).filter((s) => s.invoke !== "manual");
+  const all = eligible.slice(0, max);
+  if (!all.length) return "";
+  const rest = eligible.length - all.length;
+  return all.map((s) => `- ${s.name}${s.scope === "global" ? " (global)" : ""}${s.status === "trial" ? " (em teste)" : ""}${staleRefs(root, s).length ? " [refs obsoletas]" : ""}: ${s.description}`).join("\n")
+    + (rest > 0 ? `\n(+${rest} skills não listadas: chame skill_load com uma palavra da tarefa para receber sugestões)` : "");
+}
+
+const STOP = new Set(["para", "como", "com", "uma", "que", "the", "and", "uso", "usar", "skill", "fazer", "esta", "isso", "nos", "nas", "dos", "das", "por"]);
+export const words = (t: string) => (t.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").match(/[a-z0-9]{3,}/g) ?? []).filter((w) => !STOP.has(w));
+
+/** Skills (incluindo manuais e embutidas) ordenadas por afinidade lexical com o texto. Nome pesa mais que descrição. */
+export function suggestSkills(root: string, text: string, limit = 5): { skill: Skill; score: number }[] {
+  const q = new Set(words(text));
+  if (!q.size) return [];
+  return [...listSkills(root), ...listBuiltins(root)]
+    .map((skill) => {
+      const nm = new Set(words(skill.name)), ds = new Set(words(skill.description)), bd = new Set(words(skill.body));
+      let score = 0;
+      for (const w of q) score += (nm.has(w) ? 3 : 0) + (ds.has(w) ? 2 : 0) + (bd.has(w) ? 0.5 : 0);
+      return { skill, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name))
+    .slice(0, limit);
 }

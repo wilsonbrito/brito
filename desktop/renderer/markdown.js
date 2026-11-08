@@ -18,7 +18,7 @@ function renderMarkdown(src) {
     if (fence) {
       const code = [];
       for (i++; i < lines.length && !lines[i].startsWith("```"); i++) code.push(lines[i]);
-      out.push(`<pre class="code"><code>${esc(code.join("\n"))}</code></pre>`);
+      out.push(`<pre class="code"><button class="copy">copiar</button><code>${esc(code.join("\n"))}</code></pre>`);
       continue;
     }
     if (/^\s*\|.*\|\s*$/.test(l) && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1] ?? "")) {

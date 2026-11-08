@@ -1,21 +1,40 @@
 import { MODEL_ALIASES, loadProfiles } from "./model.js";
 import { missingKeyMessage } from "./provider/openai-compat.js";
-import { resolveModel } from "./provider/resolve.js";
+import { slmReadySync } from "./local/slm.js";
+import { SLM_MODEL, resolveModel } from "./provider/resolve.js";
 
 export type Engine = { kind: "api" } | { kind: "claude" } | { kind: "error"; message: string };
 
-/** O fallback é sempre este perfil de `providers` (não configurável). */
+/** O primeiro fallback é sempre este perfil de `providers` (não configurável). */
 export const FALLBACK_PROFILE = "qwen";
+/** Cadeia: Claude → qwen → SLM local (último recurso, sem rede nem conta). */
+export const FALLBACK_CHAIN: readonly string[] = [FALLBACK_PROFILE, SLM_MODEL];
 
 export type FallbackStatus =
-  | { ready: true; name: typeof FALLBACK_PROFILE; label: string }
+  | { ready: true; name: string; label: string }
   | { ready: false; reason: string; label?: string };
 
 /**
  * Pronto só se o perfil existe, é válido, tem a chave no ambiente e o principal não é ele mesmo. Relê o config a
  * cada chamada, como os perfis.
  */
-export function fallbackStatus(primary: string, env: NodeJS.ProcessEnv): FallbackStatus {
+export function fallbackStatus(primary: string, env: NodeJS.ProcessEnv, skip: readonly string[] = []): FallbackStatus {
+  const q = skip.includes(FALLBACK_PROFILE) ? ({ ready: false, reason: "o qwen já foi usado nesta troca" } as FallbackStatus) : qwenStatus(primary, env);
+  if (q.ready) return q;
+  const slm = slmFallbackStatus(primary, env, skip);
+  return slm.ready ? slm : q;
+}
+
+/** O SLM local como fallback: baixado (`brito slm pull`), habilitado e não é o próprio principal. */
+function slmFallbackStatus(primary: string, env: NodeJS.ProcessEnv, skip: readonly string[]): FallbackStatus {
+  if (skip.includes(SLM_MODEL)) return { ready: false, reason: "o SLM já foi usado nesta troca" };
+  if (primary.trim().toLowerCase() === SLM_MODEL) return { ready: false, reason: "o modelo principal já é o SLM" };
+  if (env.BRITO_SLM_FALLBACK === "off") return { ready: false, reason: "BRITO_SLM_FALLBACK=off" };
+  if (!slmReadySync()) return { ready: false, reason: "SLM local indisponível (rode `brito slm pull`)" };
+  return { ready: true, name: SLM_MODEL, label: resolveModel(SLM_MODEL).label };
+}
+
+function qwenStatus(primary: string, env: NodeJS.ProcessEnv): FallbackStatus {
   const { profiles, errors, rejected } = loadProfiles();
   const p = profiles[FALLBACK_PROFILE];
   const label = p?.label;
@@ -43,6 +62,7 @@ export function pickEngine(model: string, env: NodeJS.ProcessEnv, hasCli: () => 
     const why = loadProfiles().errors.find((e) => e.toLowerCase().includes(`"${name}"`)) ?? "";
     return { kind: "error", message: `o perfil "${name}" em ~/.brito/config.json está inválido (${why}); corrija antes de usar` };
   }
+  if (r.local) return slmReadySync() ? { kind: "api" } : { kind: "error", message: "o SLM local não está pronto: rode `brito slm pull`" };
   if (r.kind === "openai") return env[r.profile!.apiKeyEnv]?.trim() ? { kind: "api" } : { kind: "error", message: missingKeyMessage(r.profile!) };
   if (env.ANTHROPIC_API_KEY) return { kind: "api" };
   if (hasCli()) return { kind: "claude" };
@@ -52,7 +72,7 @@ export function pickEngine(model: string, env: NodeJS.ProcessEnv, hasCli: () => 
 /** Motivo do fallback quando a sessão já abre no qwen. */
 export const NO_ANTHROPIC = "sem conta da Anthropic";
 
-export type Opening = Engine | { kind: "fallback"; label: string };
+export type Opening = Engine | { kind: "fallback"; label: string; name: string };
 
 /**
  * Motor da abertura: o de `pickEngine`, salvo quando um Claude não tem conta (sem ANTHROPIC_API_KEY e sem o `claude`)
@@ -63,7 +83,7 @@ export function openEngine(model: string, env: NodeJS.ProcessEnv, hasCli: () => 
   const e = pickEngine(model, env, hasCli);
   if (e.kind !== "error" || resolveModel(model).kind !== "anthropic" || loadProfiles().rejected.includes(model.trim().toLowerCase())) return e;
   const s = fallbackStatus(model, env);
-  return s.ready ? { kind: "fallback", label: s.label } : { kind: "error", message: `${e.message}\nFallback (qwen) indisponível: ${s.reason}.` };
+  return s.ready ? { kind: "fallback", label: s.label, name: s.name } : { kind: "error", message: `${e.message}\nFallback (qwen) indisponível: ${s.reason}.` };
 }
 
 /**

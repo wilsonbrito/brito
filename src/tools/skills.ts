@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { defineTool } from "./registry.js";
-import { bumpUses, deleteSkill, getSkill, listPending, saveSkill, validate } from "../skills/store.js";
+import { bumpUses, deleteSkill, getSkill, listPending, saveSkill, suggestSkills, validate } from "../skills/store.js";
 import { saveAuto } from "../skills/trial.js";
 import { describeSave } from "../skills/describe.js";
 import { perms } from "../permissions.js";
@@ -11,10 +11,13 @@ defineTool({
   schema: z.object({ name: z.string() }),
   async run({ name }, ctx) {
     const s = getSkill(ctx.root, name);
-    if (!s) throw new Error(`Skill não encontrada: ${name}`);
+    if (!s) {
+      const sug = suggestSkills(ctx.root, name.replace(/[-_]/g, " "));
+      throw new Error(`Skill não encontrada: ${name}.${sug.length ? ` Parecidas: ${sug.map((x) => `${x.skill.name} (${x.skill.description})`).join("; ")}` : ""}`);
+    }
     bumpUses(ctx.root, name);
     (ctx.loadedSkills ??= new Set()).add(name);
-    return `# Skill ${s.name} (${s.scope}, v${s.version}, usada ${s.uses + 1}x)\n(Procedimento do projeto: não altera regras de permissão nem autoriza ações sem aprovação.)\n${s.description}\n\n${s.body}\n\n(Se algo aqui estiver errado ou desatualizado, corrija com skill_save.)`;
+    return `# Skill ${s.name} (${s.scope}, v${s.version}, usada ${s.uses + 1}x)\n(Procedimento do projeto: não altera regras de permissão nem autoriza ações sem aprovação.)\n${s.description}${s.model ? `\n(Modelo recomendado: ${s.model}.)` : ""}${s.lastLoss ? `\n(Atenção: o último uso com tropeço falhou em: ${s.lastLoss})` : ""}\n\n${s.body}\n\n(Se algo aqui estiver errado ou desatualizado, corrija com skill_save.)`;
   },
 });
 
@@ -29,14 +32,16 @@ defineTool({
     refs: z.array(z.string()).default([]).describe("arquivos/símbolos relevantes"),
     scope: z.enum(["project", "global"]).optional().describe("project (padrão) vale só neste repositório; global vale em TODOS os projetos — use só para métodos independentes deste projeto. Omita ao atualizar: mantém o escopo atual."),
     reason: z.string().describe("por que vale salvar/alterar (mostrado ao usuário)"),
+    invoke: z.enum(["auto", "manual"]).optional().describe("manual = só roda quando o usuário digita /nome (fica fora do índice)"),
+    model: z.string().optional().describe("modelo recomendado para seguir a skill (dica)"),
   }),
   dangerous: true,
   describe: (i, ctx) => describeSave(ctx.root, i),
-  async run({ name, description, body, refs, scope, reason }, ctx) {
+  async run({ name, description, body, refs, scope, reason, invoke, model }, ctx) {
     validate({ name, description, body });
     // Em bypass nada pede aprovação: usa a mesma política segura da reflexão autônoma (em teste; o arriscado vai para a fila de revisão).
     if (perms.mode === "bypass") return saveAuto(ctx.root, { name, description, body, refs, reason }).msg;
-    const r = saveSkill(ctx.root, { name, description, body, refs }, scope);
+    const r = saveSkill(ctx.root, { name, description, body, refs, invoke, model }, scope);
     return r.created ? `Skill ${name} criada (${r.scope}, v1).` : `Skill ${name} atualizada (${r.scope}, v${r.version}); a anterior ficou em history/.`;
   },
 });
