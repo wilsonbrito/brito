@@ -1,6 +1,24 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 — 2026-11-08
+
+The desktop app gets a real interface: streaming, diffs, panels and the same resources as the terminal.
+
+### Added
+- Streaming text with incremental rendering (no more flicker or lost selection), tool cards with diffs for `edit_file`/`write_file`, full tool output (up to 20000 chars), a subagent card and a pinned task list.
+- Permission prompts show a colored diff and offer "allow for this session" and "always in this project" (remembered per folder in `~/.brito/desktop-allow.json`; plan/skill approvals always ask).
+- Composer: `/` menu with commands and skills (manual skills run like in the terminal), `@` file autocomplete, drag files in, history with ↑/↓, Esc to interrupt, `/clear`, `/help`.
+- Engine badge (cloud / endpoint / local) with a fallback warning, and endpoint profiles in the model picker.
+- Panels for Skills (approve/reject/promote/remove), Agents, Code graph (search, callers/callees, reindex), Memory (notes) and Changed files.
+- Ctrl/Cmd+K command palette, full-text search across sessions, light/dark/system theme, export conversation to markdown.
+- Typed and versioned app ↔ backend protocol; the app warns when it and the CLI are out of sync.
+- `npm run release <X.Y.Z>` prepares a release (clean tree, CHANGELOG, typecheck, tests, bump, tag). Pushing the tag builds the installers, creates the GitHub Release and publishes to npm (Trusted Publishing, no token).
+
+### Fixed
+- On Windows without Node.js the desktop app now says what is missing instead of failing with `ERR_DLOPEN_FAILED`.
+- When the backend dies, the conversation says so and the next message reconnects and resumes.
+
+## 0.8.0 — 2026-11-07
 
 Cheaper and smarter turns with an Anthropic API key. Permission rules, and no more edits made from memory. Resume where you left off, and a visible task list.
 
