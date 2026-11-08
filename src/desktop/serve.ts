@@ -2,6 +2,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
+import { execFileSync } from "node:child_process";
+import { PROTOCOL, type CommandInfo } from "./protocol.js";
+import { Panels, graphRootFor } from "./panels.js";
 import { randomUUID } from "node:crypto";
 import "../tools/fs.js";
 import "../tools/bash.js";
@@ -26,12 +29,12 @@ import { engineChip, activateFallback, chooseModel, cliShouldFallBack, fallbackW
 import { contextWindowFor, resolveModel } from "../provider/resolve.js";
 import type { Msg } from "../provider/types.js";
 import { PLAN_NOTE, perms, type PermMode } from "../permissions.js";
-import { skillsIndex } from "../skills/store.js";
+import { getSkill, listBuiltins, listSkills, skillsIndex } from "../skills/store.js";
 import type { ToolContext } from "../tools/registry.js";
 
 /**
  * Backend do app desktop, controlado por JSON em linhas.
- * stdin  → {t:"send",text} {t:"abort"} {t:"approve",id,allow} {t:"config",model?,effort?,mode?} {t:"reset"} {t:"quit"}
+ * stdin  → {t:"send",text} {t:"abort"} {t:"approve",id,allow,scope?:"session"} {t:"config",model?,effort?,mode?} {t:"reset"} {t:"quit"}
  * stdout → linhas "@@{json}" (qualquer outra linha, como logs perdidos, a janela ignora).
  * Motor: perfil de endpoint (ex.: Qwen) ou ANTHROPIC_API_KEY usam o loop próprio (como o `brito` no terminal); sem
  * nada disso, o `claude` CLI (assinatura). Se o Claude cai por conta/capacidade (ou nem há conta), segue no qwen.
@@ -40,6 +43,50 @@ import type { ToolContext } from "../tools/registry.js";
 const MARK = "@@";
 const emit = (ev: Record<string, unknown>) => process.stdout.write(MARK + JSON.stringify(ev) + "\n");
 
+/** Selo do motor (☁ nuvem / 🌐 endpoint / 💻 local, ou ⚠ FALLBACK), igual ao da barra de status da CLI. */
+const chipOf = (model: string, fb?: FallbackState) => { try { return engineChip(model, fb).text; } catch { return model; } };
+
+const BUILTIN_COMMANDS: CommandInfo[] = [
+  { name: "clear", description: "limpa a conversa", kind: "builtin" },
+  { name: "fallback", description: "estado do fallback Claude → modelo local", kind: "builtin" },
+  { name: "help", description: "lista os comandos", kind: "builtin" },
+];
+
+/** Arquivos do projeto para o `@`: git ls-files (respeita .gitignore); sem git, uma varredura rasa. */
+let fileCache: { root: string; at: number; files: string[] } | null = null;
+function projectFiles(root: string): string[] {
+  if (fileCache && fileCache.root === root && Date.now() - fileCache.at < 15000) return fileCache.files;
+  let files: string[] = [];
+  try {
+    files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: root, encoding: "utf8", maxBuffer: 16 << 20, timeout: 5000 }).split("\n").filter(Boolean);
+  } catch {
+    const walk = (dir: string, depth: number) => {
+      if (depth > 4 || files.length > 5000) return;
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.name.startsWith(".") || e.name === "node_modules") continue;
+        const rel = path.relative(root, path.join(dir, e.name)).split(path.sep).join("/");
+        e.isDirectory() ? walk(path.join(dir, e.name), depth + 1) : files.push(rel);
+      }
+    };
+    try { walk(root, 0); } catch { /* pasta ilegível */ }
+  }
+  fileCache = { root, at: Date.now(), files };
+  return files;
+}
+
+/** "Permitir sempre neste projeto": tipos de ação liberados, guardados por pasta em ~/.brito/desktop-allow.json. */
+const allowFile = () => path.join(os.homedir(), ".brito", "desktop-allow.json");
+function loadAllow(root: string): string[] {
+  try { return JSON.parse(fs.readFileSync(allowFile(), "utf8"))[path.resolve(root)] ?? []; } catch { return []; }
+}
+function saveAllow(root: string, kinds: string[]) {
+  let all: Record<string, string[]> = {};
+  try { all = JSON.parse(fs.readFileSync(allowFile(), "utf8")); } catch { /* primeiro uso */ }
+  all[path.resolve(root)] = kinds;
+  fs.mkdirSync(path.dirname(allowFile()), { recursive: true });
+  fs.writeFileSync(allowFile(), JSON.stringify(all, null, 1));
+}
+
 const sink: TurnSink = {
   turnStart: () => emit({ t: "turnStart" }),
   turnEnd: (ok = true) => emit({ t: "turnEnd", ok }),
@@ -47,7 +94,7 @@ const sink: TurnSink = {
   textEnd: () => emit({ t: "textEnd" }),
   thinking: (text) => emit({ t: "thinking", text }),
   toolStart: (id, name, input) => emit({ t: "toolStart", id, name, input }),
-  toolEnd: (id, isError, output) => emit({ t: "toolEnd", id, isError, output: (output ?? "").slice(0, 4000) }),
+  toolEnd: (id, isError, output) => emit({ t: "toolEnd", id, isError, output: (output ?? "").slice(0, 20000) }),
   info: (msg) => emit({ t: "info", msg }),
   warn: (msg) => emit({ t: "warn", msg }),
   error: (msg) => emit({ t: "error", msg }),
@@ -92,12 +139,17 @@ interface ApiEngineOpts {
 }
 
 export async function serveDesktop(root: string, resumeId?: string): Promise<void> {
-  const pending = new Map<string, (ok: boolean) => void>();
+  const pending = new Map<string, { resolve: (ok: boolean) => void; kind: string }>();
+  /** Tipos de pedido liberados com "permitir nesta sessão" (nunca vale para pedidos `force`, como aprovar plano ou skill). */
+  const projectAllow = new Set<string>(loadAllow(root));
+  const sessionAllow = new Set<string>(projectAllow);
+  emit({ t: "hello", protocol: PROTOCOL });
+  const kindOf = (text: string) => text.split(/[:\s]/, 1)[0].toLowerCase();
   const ask = (text: string, opts?: { force?: boolean }) =>
-    perms.mode === "bypass" && !opts?.force ? Promise.resolve(true) : new Promise<boolean>((resolve) => {
+    (perms.mode === "bypass" || sessionAllow.has(kindOf(text))) && !opts?.force ? Promise.resolve(true) : new Promise<boolean>((resolve) => {
       const id = randomUUID();
-      pending.set(id, resolve);
-      emit({ t: "approval", id, text, force: !!opts?.force });
+      pending.set(id, { resolve, kind: opts?.force ? "" : kindOf(text) });
+      emit({ t: "approval", id, text, force: !!opts?.force, kind: kindOf(text) });
     });
 
   // Na pasta pessoal (projeto "Home") indexar tudo seria enorme e inútil: sem índice ali.
@@ -262,11 +314,12 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
   }
 
   let busy = false;
-  const ready = () => emit({ t: "ready", engine: engine.kind, sessionId: engine.sessionId, model: engine.model, effort: engine.effort, mode: perms.mode, symbols: syms, notes, root, fallback: engine.fallback.active });
+  const panels = new Panels(root, graphRootFor(root), isHome);
+  const ready =() => emit({ t: "ready", engine: engine.kind, sessionId: engine.sessionId, model: engine.model, effort: engine.effort, mode: perms.mode, symbols: syms, notes, root, fallback: engine.fallback.active, chip: chipOf(engine.model, engine.fallback) });
   ready();
 
   const rl = readline.createInterface({ input: process.stdin });
-  const quit = async () => { closeApproval(); try { await engine.close(); } catch { /* saindo */ } process.exit(0); };
+  const quit = async () => { closeApproval(); try { await panels.close(); await engine.close(); } catch { /* saindo */ } process.exit(0); };
   rl.on("close", quit);
   rl.on("line", async (line) => {
     let m: any;
@@ -281,15 +334,61 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
           sink.turnStart(); sink.text("```\n" + lines.join("\n") + "\n```"); sink.textEnd(); sink.turnEnd(true);
           return;
         }
+        // /nome de uma skill: mesma invocação do REPL (skill_load + contexto).
+        let text = String(m.text ?? "");
+        const [cmd, ...args] = text.trim().split(/\s+/);
+        const sk = cmd.startsWith("/") && !cmd.slice(1).includes("/") ? getSkill(root, cmd.slice(1).toLowerCase()) : null;
+        if (sk) {
+          const ctxText = args.join(" ");
+          text = `Invoquei a skill ${sk.name}. Chame skill_load("${sk.name}") agora e siga-a.${ctxText ? `\n\nContexto: ${ctxText}` : "\n\n(Sem contexto extra: comece perguntando sobre o que quero trabalhar.)"}`;
+        }
         busy = true;
-        try { await engine.send(String(m.text ?? "")); } finally {
+        try { await engine.send(text); } finally {
           busy = false;
-          emit({ t: "usage", ...engine.stats(), model: engine.model, sessionId: engine.sessionId, fallback: engine.fallback.active });
+          emit({ t: "usage", ...engine.stats(), model: engine.model, sessionId: engine.sessionId, fallback: engine.fallback.active, chip: chipOf(engine.model, engine.fallback) });
         }
         break;
       }
       case "abort": engine.abort(); break;
-      case "approve": pending.get(m.id)?.(!!m.allow); pending.delete(m.id); break;
+      case "query": {
+        let data: unknown = [];
+        try {
+          const arg = String(m.arg ?? "").toLowerCase();
+          if (["skills", "skill", "agents", "symbols", "symbol", "notes"].includes(m.q)) {
+            const raw = String(m.arg ?? "");
+            data = m.q === "skills" ? panels.skills() : m.q === "skill" ? panels.skill(raw) : m.q === "agents" ? panels.agents()
+              : m.q === "symbols" ? await panels.symbols(raw) : m.q === "symbol" ? await panels.symbol(raw) : await panels.notes(raw);
+            emit({ t: "result", id: m.id, data });
+            break;
+          }
+          if (m.q === "files") data = projectFiles(root).filter((f) => !f.startsWith(".brito/") && (!arg || f.toLowerCase().includes(arg))).sort((a, b) => a.length - b.length).slice(0, 30);
+          else if (m.q === "commands") {
+            const skills: CommandInfo[] = [...listBuiltins(root), ...listSkills(root).filter((s) => s.invoke === "manual")].map((s) => ({ name: s.name, description: s.description, kind: "skill" as const }));
+            data = [...BUILTIN_COMMANDS, ...skills].filter((c) => !arg || c.name.includes(arg));
+          } else if (m.q === "models") data = { aliases: Object.keys(MODEL_ALIASES), profiles: Object.keys(loadProfiles().profiles) };
+        } catch (e: any) { sink.warn(`consulta ${m.q} falhou: ${e?.message ?? e}`); }
+        emit({ t: "result", id: m.id, data });
+        break;
+      }
+      case "action": {
+        try {
+          const arg = String(m.arg ?? "");
+          const msg = m.op === "graph.reindex" ? `grafo reindexado (${(await panels.reindex()).symbols} símbolos)`
+            : m.op === "note.delete" ? await panels.deleteNote(arg)
+            : panels.skillAction(String(m.op).replace(/^skill\./, ""), arg);
+          emit({ t: "result", id: m.id, data: { ok: true, msg } });
+        } catch (e: any) { emit({ t: "result", id: m.id, data: { ok: false, msg: e?.message ?? String(e) } }); }
+        break;
+      }
+      case "approve": {
+        const p = pending.get(m.id);
+        if (p && m.allow && (m.scope === "session" || m.scope === "project") && p.kind) {
+          sessionAllow.add(p.kind);
+          if (m.scope === "project") try { projectAllow.add(p.kind); saveAllow(root, [...projectAllow]); } catch (e: any) { sink.warn(`não consegui salvar a permissão: ${e?.message ?? e}`); }
+        }
+        p?.resolve(!!m.allow); pending.delete(m.id);
+        break;
+      }
       case "config": {
         if (typeof m.model === "string") engine.setModel(m.model ? MODEL_ALIASES[m.model] ?? m.model : ""); // vazio = modelo/perfil salvo
         if (m.effort !== undefined) engine.effort = isEffort(m.effort) ? m.effort : "";
