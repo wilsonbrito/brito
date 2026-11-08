@@ -134,7 +134,7 @@ function renderTop() {
   const set = s?.settings ?? state.settings;
   $("mode").value = set.mode; $("model").value = set.model; $("effort").value = set.effort;
   const b = r?.backend ?? "off";
-  $("st-backend").innerHTML = b === "on" ? `<span class="ok">●</span> Conectado · ${r?.engine === "api" ? "API" : "assinatura"}${r?.fallback ? ` · ${String(r.model).replace(/[<>&"]/g, "")} (fallback)` : ""}` : b === "starting" ? '<span class="bad">●</span> Iniciando backend…' : "○ Backend parado";
+  $("st-backend").innerHTML = b === "on" ? `<span class="ok">●</span> Conectado · ${r?.engine === "api" ? "API" : "assinatura"}${r?.fallback ? ` · ${String(r.chip || r.model).replace(/[<>&"]/g, "")}` : r?.chip ? ` · ${String(r.chip).replace(/[<>&"]/g, "")}` : ""}` : b === "starting" ? '<span class="bad">●</span> Iniciando backend…' : "○ Backend parado";
   $("st-dir").textContent = s ? projectOf(s)?.path ?? "" : "";
   const u = r?.usage;
   $("st-usage").textContent = u ? `${fmtK(u.contextTokens)} contexto${u.costUsd ? ` · $${u.costUsd.toFixed(2)}` : ""}` : "";
@@ -160,7 +160,7 @@ function onEvent(sessionId, ev) {
     case "warn": case "error": note(s, ev.t, ev.msg); break;
     case "approval": r.approvals.push(ev); if (sessionId === state.activeId) showApproval(); break;
     case "turnEnd": r.busy = false; s.updated = Date.now(); break;
-    case "usage": r.usage = { contextTokens: ev.contextTokens, costUsd: ev.costUsd }; r.model = ev.model; r.fallback = !!ev.fallback; if (ev.sessionId) s.claudeId = ev.sessionId; break;
+    case "usage": r.usage = { contextTokens: ev.contextTokens, costUsd: ev.costUsd }; r.model = ev.model; r.fallback = !!ev.fallback; r.chip = ev.chip; if (ev.sessionId) s.claudeId = ev.sessionId; break;
     case "closed": r.backend = "off"; r.busy = false; for (const t of s.items) if (t.k === "tool" && !t.done) { t.done = true; t.isError = true; } break;
   }
   persist();

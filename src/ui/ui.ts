@@ -349,7 +349,7 @@ class UI {
    * Barra de status: cada indicador tem um rótulo para quem não conhece os números.
    * Se não couber na largura do terminal, descarta primeiro os de menor prioridade (tempo, extra, tokens…).
    */
-  statusLine(s: { model: string; ctxTokens: number; ctxWindow: number; input: number; output: number; cacheRead?: number; startedAt: number; extra?: string; cost?: number; mode?: string; project?: string }) {
+  statusLine(s: { model: string; ctxTokens: number; ctxWindow: number; input: number; output: number; cacheRead?: number; startedAt: number; extra?: string; cost?: number; mode?: string; project?: string; engine?: { text: string; fallback: boolean } }) {
     const pct = Math.min(100, Math.round((s.ctxTokens / s.ctxWindow) * 100));
     const slots = 8, filled = Math.round((pct / 100) * slots);
     const colour = pct >= 95 ? c.err : pct >= 80 ? c.rgb(palette.orange) : pct >= 50 ? c.warn : c.ok;
@@ -366,6 +366,7 @@ class UI {
       ...(s.project ? [[0, c.light("📁 ") + c.bold(c.soft(s.project))] as [number, string]] : []),
       ...(s.mode ? [[0, s.mode] as [number, string]] : []),
       [0, c.light("⬢ ") + c.bold(c.soft(s.model))],
+      ...(s.engine ? [[s.engine.fallback ? 0 : 1, s.engine.fallback ? c.bold(c.rgb(palette.warn)(s.engine.text)) : c.muted(s.engine.text)] as [number, string]] : []),
       [0, label("contexto") + c.muted(`${fmtTokens(s.ctxTokens)}/${fmtTokens(s.ctxWindow)}`) + ` [${bar}] ${colour(`${pct}%`)}`],
       ...(hit !== undefined ? [[2, label("cache") + hitColour(`◎ ${Math.round(hit)}%`)] as [number, string]] : []),
       [3, label("tokens") + c.muted(`↑${fmtTokens(s.input)} ↓${fmtTokens(s.output)}`)],
@@ -391,6 +392,7 @@ class UI {
       ["cache", "% do prompt reaproveitado do cache (◎). Alto (verde) = respostas mais rápidas e baratas. Some enquanto não há dado."],
       ["tokens", "total da sessão: ↑ enviados ao modelo (inclui cache) · ↓ gerados por ele."],
       ["custo", "gasto estimado da sessão em dólares."],
+      ["motor", "de onde vêm as respostas: ☁ nuvem (Claude), 🌐 endpoint (ex.: qwen) ou 💻 local (SLM). ⚠ FALLBACK = troca automática ativa, com a hora em que o Claude é tentado de novo."],
       ["tempo", "há quanto tempo a sessão está aberta · (ativo) soma do tempo gasto em todos os turnos."],
       ["📁", "projeto (pasta) em que o Brito está trabalhando — também aparece no título da janela do terminal."],
       ["skill", "skill carregada (skill_load) no turno em andamento."],

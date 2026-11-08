@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { FALLBACK_CHAIN, type FallbackStatus } from "../engine.js";
-import { SLM_MODEL } from "./resolve.js";
+import { SLM_MODEL, resolveModel } from "./resolve.js";
 
 /** Por que o Claude falhou. Só `other` (erro de conteúdo, bug, interrupção) não troca para o qwen. */
 export type FailureKind = "quota" | "rate_limit" | "overloaded" | "auth" | "network" | "other";
@@ -192,6 +192,19 @@ export const retryPrompt = (text: string, resumed = false) => `${RETRY_NOTE}${re
 export const onceRestore = (restore: string | null, fallbackActive: boolean): string | null => (fallbackActive ? null : restore);
 
 const hhmm = (ms: number) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+
+/**
+ * Selo do motor para a barra de status: de onde vêm as respostas agora (nuvem, endpoint ou local) e se é fallback.
+ * `fallback` = true quando a troca automática está ativa (o selo vira aviso e diz quando o Claude é tentado de novo).
+ */
+export function engineChip(model: string, fb?: FallbackState): { text: string; fallback: boolean } {
+  const r = resolveModel(model);
+  const where = r.kind === "anthropic" ? "☁ nuvem" : (r as { local?: boolean }).local ? "💻 local" : "🌐 endpoint";
+  const text = `${where} · ${r.label}`;
+  if (!fb?.active) return { text, fallback: false };
+  const back = fb.until ? `; Claude volta ${hhmm(fb.until)}` : "; /model para voltar";
+  return { text: `⚠ FALLBACK ${text}${back}`, fallback: true };
+}
 
 /**
  * Linhas do `/fallback`. Principal = o modelo vivo, salvo com o fallback ativo (aí é o principal original e o qwen

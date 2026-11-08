@@ -233,3 +233,15 @@ test("/fallback com SLM em uso mostra o horário de retorno", () => {
   assert.match(out, /SLM local .* em uso/);
   assert.match(out, /\(SLM local\) — Claude falhou: quota \(limit\) — o Claude é tentado de novo às 11:00/);
 });
+
+import { engineChip } from "../src/provider/fallback.js";
+test("engineChip: diz de onde vem a resposta e destaca o fallback", () => {
+  assert.match(engineChip("claude-sonnet-4-5").text, /nuvem/);
+  assert.equal(engineChip("claude-sonnet-4-5").fallback, false);
+  assert.match(engineChip("slm").text, /local/);
+  const s = newFallbackState("claude-sonnet-4-5");
+  activateFallback(s, "quota", Date.now(), Date.now() + 60_000, "slm");
+  const chip = engineChip("slm", s);
+  assert.equal(chip.fallback, true);
+  assert.match(chip.text, /FALLBACK.*local.*Claude volta/);
+});

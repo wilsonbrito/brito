@@ -22,7 +22,7 @@ import { openGraphAfterClaude } from "../graph/store.js";
 import { indexProject } from "../graph/indexer.js";
 import { initialEffort, initialModel, isEffort, loadProfiles, MODEL_ALIASES, type Effort } from "../model.js";
 import { NO_ANTHROPIC, fallbackStatus, openEngine } from "../engine.js";
-import { activateFallback, chooseModel, cliShouldFallBack, fallbackWarning, newFallbackState, renderFallback, retryPrompt, type FallbackState } from "../provider/fallback.js";
+import { engineChip, activateFallback, chooseModel, cliShouldFallBack, fallbackWarning, newFallbackState, renderFallback, retryPrompt, type FallbackState } from "../provider/fallback.js";
 import { contextWindowFor, resolveModel } from "../provider/resolve.js";
 import type { Msg } from "../provider/types.js";
 import { PLAN_NOTE, perms, type PermMode } from "../permissions.js";

@@ -7,6 +7,7 @@ import { Dock, type Command } from "./ui/dock.js";
 import os from "node:os";
 import { ui, c, fmtTokens, type BannerInfo } from "./ui/ui.js";
 import { cols } from "./ui/theme.js";
+import { engineChip, type FallbackState } from "./provider/fallback.js";
 
 /** Nome do usuário da máquina (fallback para variáveis de ambiente). */
 const userName = () => {
@@ -23,6 +24,8 @@ export interface ReplBackend {
   usage(): { input: number; output: number; cacheRead?: number };
   ctxWindow: number;
   cost?(): number | undefined;
+  /** Estado do fallback da sessão (para o selo do motor na barra de status). */
+  fallback?(): FallbackState | undefined;
   /** Roda um turno, desenhando tudo via `ui`. Devolve false se falhou/foi interrompido. */
   turn(text: string, signal: AbortSignal): Promise<boolean>;
   /** Para backends que não respeitam AbortSignal (processo filho). */
@@ -70,6 +73,7 @@ export function switchableBackend(initial: ReplBackend): SwitchableBackend {
       const all = [...seen].map((b) => b.cost?.()).filter((x): x is number => x !== undefined);
       return all.length ? all.reduce((s, x) => s + x, 0) : undefined;
     },
+    fallback: () => cur.fallback?.() ?? [...seen].map((b) => b.fallback?.()).find((s) => s?.active),
     turn: (text, signal) => cur.turn(text, signal),
     abort: () => cur.abort?.(),
     // Todos os motores: o claude CLI fora de uso guarda a sessão (--resume) e os turnos que o fallback herdaria.
@@ -121,6 +125,7 @@ export async function runRepl(b: ReplBackend, o: ReplOpts) {
   const status = () => ui.statusLine({
     project: path.basename(o.root),
     mode: modeChip(),
+    engine: engineChip(b.model(), b.fallback?.()),
     model: b.model(), ctxTokens: b.contextTokens(), ctxWindow: b.ctxWindow,
     input: b.usage().input, output: b.usage().output, cacheRead: b.usage().cacheRead, startedAt: o.startedAt, cost: b.cost?.(),
     extra: `${skillCount} ${skillCount === 1 ? "skill" : "skills"}`,

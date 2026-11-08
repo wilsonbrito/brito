@@ -515,6 +515,7 @@ async function buildApiBackend(root: string, model: string, io: { ask: (q: strin
   const modelCmd = modelCommand(() => agent.model, (m) => { agent.model = m; chooseModel(fallback, m); }, "(troque com /model; subagentes explore usam BRITO_EXPLORE_MODEL)", noApiKey, o.divert);
   const backend: ReplBackend = {
     model: () => agent.model,
+    fallback: () => fallback,
     contextTokens: () => agent.contextTokens,
     usage: () => agent.usage,
     get ctxWindow() { return contextWindowFor(agent.model); },
@@ -656,6 +657,7 @@ async function buildClaudeBackend(root: string, io: Io, sw: () => SwitchableBack
   const mcpTools = allTools().map((t) => t.name).filter((n) => /^(graph_|skill_)/.test(n) || n === "remember" || n === "recall");
   const backend: ReplBackend = {
     model: () => session.model,
+    fallback: () => fallback,
     contextTokens: () => session.contextTokens,
     usage: () => session.usage,
     cost: () => (session.costUsd > 0 ? session.costUsd : undefined),
