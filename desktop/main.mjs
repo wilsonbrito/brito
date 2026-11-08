@@ -38,6 +38,8 @@ function backendRuntime() {
       const node = execFileSync("where", ["node"], { encoding: "utf8", timeout: 4000 }).split(/\r?\n/).find((l) => l.trim());
       if (node) return { bin: node.trim(), env: {} };
     } catch { /* sem node no PATH */ }
+    // Sem Node, o Electron não carrega o addon do grafo: falhar aqui com a causa clara em vez de um ERR_DLOPEN_FAILED.
+    throw new Error("O Brito precisa do Node.js 20+ no Windows (o grafo não roda dentro do Electron). Instale em https://nodejs.org ou aponte BRITO_NODE para o node.exe.");
   }
   return { bin: process.execPath, env: { ELECTRON_RUN_AS_NODE: "1" } };
 }

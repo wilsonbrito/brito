@@ -11,6 +11,7 @@ import "../tools/bash.js";
 import { implementIo } from "../tools/implement.js";
 import "../tools/spec.js";
 import { ORCH_ONLY, orch } from "../orchestrator.js";
+import "../tools/digest.js";
 import { allTools, execTool, type ToolContext } from "../tools/registry.js";
 import { GraphStore } from "../graph/store.js";
 import { INDEXED_EXTENSIONS, indexProject } from "../graph/indexer.js";
@@ -36,7 +37,7 @@ export const MCP_INSTRUCTIONS = [
  * tools de consulta, que são baratas e de uso frequente. As de escrita e a de aprovação (interna) continuam adiadas.
  */
 export const ALWAYS_LOAD_META = "anthropic/alwaysLoad";
-export const alwaysLoaded = (tool: string) => /^(graph_|recall$|remember$|skill_load$|implement$)/.test(tool);
+export const alwaysLoaded = (tool: string) => /^(graph_|recall$|remember$|skill_load$|digest$|implement$)/.test(tool);
 
 /** Prefixo com que o claude CLI enxerga as tools deste servidor. */
 export const MCP_PREFIX = `mcp__${MCP_NAME}__`;
@@ -45,7 +46,7 @@ export const APPROVE_TOOL = "approve";
 
 // fs/bash/delegate o próprio claude já tem (Read/Edit/Bash/Task); aqui vai só o que é do Brito.
 /** Tools que o claude enxerga; `implement` e `spec_save` só com o modo orquestrador ligado (BRITO_ORCH=1). */
-export const exposed = () => allTools().filter((t) => /^(graph_|skill_)/.test(t.name) || t.name === "remember" || t.name === "recall" || (ORCH_ONLY.includes(t.name) && orch.on));
+export const exposed = () => allTools().filter((t) => /^(graph_|skill_)/.test(t.name) || t.name === "remember" || t.name === "recall" || t.name === "digest" || (ORCH_ONLY.includes(t.name) && orch.on));
 
 /** Nome do pedido de aprovação de uma ação do implementador (o terminal mostra só a pergunta). */
 export const IMPL_ASK = "BritoImplementer";

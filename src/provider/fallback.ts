@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { FALLBACK_PROFILE, type FallbackStatus } from "../engine.js";
+import { FALLBACK_CHAIN, type FallbackStatus } from "../engine.js";
+import { SLM_MODEL, resolveModel } from "./resolve.js";
 
 /** Por que o Claude falhou. Só `other` (erro de conteúdo, bug, interrupção) não troca para o qwen. */
 export type FailureKind = "quota" | "rate_limit" | "overloaded" | "auth" | "network" | "other";
@@ -103,6 +104,10 @@ export interface FallbackState {
   reason?: string;
   /** quando trocou (ms desde a época) */
   at?: number;
+  /** até quando o fallback vale (ms); passado esse instante o próximo turno tenta o Claude de novo. Sem valor = até `/model` */
+  until?: number;
+  /** modelo em uso depois da troca (qwen ou slm) */
+  using?: string;
 }
 
 export const newFallbackState = (primary: string): FallbackState => ({ primary, active: false });
@@ -113,18 +118,58 @@ export function chooseModel(s: FallbackState, model: string): void {
   s.active = false;
   s.reason = undefined;
   s.at = undefined;
+  s.until = undefined;
+  s.using = undefined;
 }
 
 /** A troca automática aconteceu. */
-export function activateFallback(s: FallbackState, reason: string, at = Date.now()): void {
+export function activateFallback(s: FallbackState, reason: string, at = Date.now(), until?: number, using?: string): void {
   s.active = true;
   s.reason = reason;
   s.at = at;
+  if (until !== undefined) s.until = until;
+  if (using !== undefined) s.using = using;
+}
+
+/** Minutos de fallback por tipo de falha (BRITO_FALLBACK_MINUTES sobrepõe): cota/auth demoram mais a voltar que sobrecarga. */
+const WINDOW_MIN: Record<FailureKind, number> = { quota: 60, auth: 60, rate_limit: 10, overloaded: 10, network: 10, other: 10 };
+
+/**
+ * Até quando o fallback vale. Usa o horário de reset que o erro informa ("resets 3pm", "resets at 15:30") quando existe
+ * (no futuro e em até 12h); senão a janela por tipo de falha.
+ */
+export function fallbackUntil(kind: FailureKind, why: string, env: NodeJS.ProcessEnv = process.env, now = Date.now()): number {
+  const m = /resets?(?: at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i.exec(why);
+  if (m) {
+    let h = Number(m[1]);
+    const min = Number(m[2] ?? 0);
+    const ap = m[3]?.toLowerCase();
+    if (ap === "pm" && h < 12) h += 12;
+    if (ap === "am" && h === 12) h = 0;
+    if (h <= 23 && min <= 59) {
+      const d = new Date(now);
+      d.setHours(h, min, 0, 0);
+      if (d.getTime() <= now) d.setDate(d.getDate() + 1);
+      if (d.getTime() - now <= 12 * 3_600_000) return d.getTime() + 60_000;
+    }
+  }
+  const custom = Number(env.BRITO_FALLBACK_MINUTES);
+  return now + (custom > 0 ? custom : WINDOW_MIN[kind]) * 60_000;
+}
+
+/** A janela do fallback acabou: o próximo turno deve tentar o Claude de novo. */
+export const fallbackExpired = (s: FallbackState, now = Date.now()): boolean => s.active && s.until !== undefined && now >= s.until;
+
+/** Volta ao modelo principal (sem apagar o motivo da última troca: o aviso o usa). */
+export function returnToPrimary(s: FallbackState): void {
+  s.active = false;
+  s.until = undefined;
+  s.using = undefined;
 }
 
 /** Aviso impresso na troca (modo API e claude CLI): a troca nunca é silenciosa. */
-export const fallbackWarning = (kind: FailureKind, why: string, label: string) =>
-  `⚠ Claude falhou (${kind}: ${why}) — seguindo com ${label}. /fallback para detalhes, /model <claude> para voltar.`;
+export const fallbackWarning = (kind: FailureKind, why: string, label: string, until?: number) =>
+  `⚠ Claude falhou (${kind}: ${why}) — seguindo com ${label}${until ? `; tento o Claude de novo às ${hhmm(until)}` : ""}. /fallback para detalhes, /model <claude> para voltar.`;
 
 /**
  * O turno do claude CLI que falhou deve ser refeito no qwen? Só com falha de conta/capacidade, fallback pronto e
@@ -149,18 +194,34 @@ export const onceRestore = (restore: string | null, fallbackActive: boolean): st
 const hhmm = (ms: number) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
 
 /**
+ * Selo do motor para a barra de status: de onde vêm as respostas agora (nuvem, endpoint ou local) e se é fallback.
+ * `fallback` = true quando a troca automática está ativa (o selo vira aviso e diz quando o Claude é tentado de novo).
+ */
+export function engineChip(model: string, fb?: FallbackState): { text: string; fallback: boolean } {
+  const r = resolveModel(model);
+  const where = r.kind === "anthropic" ? "☁ nuvem" : (r as { local?: boolean }).local ? "💻 local" : "🌐 endpoint";
+  const text = `${where} · ${r.label}`;
+  if (!fb?.active) return { text, fallback: false };
+  const back = fb.until ? `; Claude volta ${hhmm(fb.until)}` : "; /model para voltar";
+  return { text: `⚠ FALLBACK ${text}${back}`, fallback: true };
+}
+
+/**
  * Linhas do `/fallback`. Principal = o modelo vivo, salvo com o fallback ativo (aí é o principal original e o qwen
  * aparece em uso). `status` vem de `fallbackStatus(state.primary, env)`; `engineLabel` é o motor do principal.
  */
 export function renderFallback(state: FallbackState, liveModel: string, engineLabel: string, status: FallbackStatus): string[] {
   const primary = state.active ? state.primary : liveModel;
   const name = status.label ?? "—";
-  const self = !state.active && primary.trim().toLowerCase() === FALLBACK_PROFILE;
-  const fb = state.active ? `${name}  qwen · ~/.brito/config.json  ● em uso`
-    : status.ready ? `${name}  qwen · ~/.brito/config.json  ✓ pronto`
-    : self ? `${name}  — o modelo principal já é o qwen`
+  const self = !state.active && !status.ready && FALLBACK_CHAIN.includes(primary.trim().toLowerCase());
+  const using = state.using === SLM_MODEL ? "SLM local" : "qwen";
+  const src = (state.active ? state.using : status.ready ? ("name" in status ? status.name : "") : "") === SLM_MODEL ? "local · brito slm" : "qwen · ~/.brito/config.json";
+  const fb = state.active ? `${name}  ${src}  ● em uso`
+    : status.ready ? `${name}  ${src}  ✓ pronto`
+    : self ? `${name}  — o modelo principal já é o ${primary.trim().toLowerCase() === SLM_MODEL ? "SLM" : "qwen"}`
     : `${name}  ✗ ${status.reason}`;
-  const estado = state.active ? `ATIVO desde ${hhmm(state.at ?? Date.now())} — Claude falhou: ${state.reason ?? "?"}. /model <claude> para voltar`
+  const volta = state.until ? ` — o Claude é tentado de novo às ${hhmm(state.until)}` : "";
+  const estado = state.active ? `ATIVO desde ${hhmm(state.at ?? Date.now())}${state.using ? ` (${using})` : ""} — Claude falhou: ${state.reason ?? "?"}${volta}. /model <claude> para voltar${state.until ? " agora" : ""}`
     : status.ready ? "inativo — troca automática se o Claude falhar por limite, crédito, auth ou sobrecarga"
     : self ? "não se aplica"
     : "indisponível — sem troca automática nesta sessão";

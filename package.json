@@ -1,6 +1,6 @@
 {
   "name": "brito-cli",
-  "version": "0.7.5",
+  "version": "0.8.0",
   "description": "Coding-agent CLI with a code knowledge graph, memory and reviewable skills / CLI de agente de código com grafo de conhecimento, memória e skills revisáveis",
   "type": "module",
   "bin": {
@@ -17,7 +17,8 @@
     "desktop": "npm run build && npm run bundle && npm --prefix desktop install --no-audit --no-fund && npm --prefix desktop start",
     "bundle": "node build-bundle.mjs",
     "desktop:app": "npm run build && npm run bundle && npm --prefix desktop install --no-audit --no-fund && node desktop/package.mjs --install",
-    "desktop:dmg": "npm run build && npm run bundle && npm --prefix desktop install --no-audit --no-fund && node desktop/package.mjs --dmg"
+    "desktop:dmg": "npm run build && npm run bundle && npm --prefix desktop install --no-audit --no-fund && node desktop/package.mjs --dmg",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.137.0",
@@ -73,5 +74,8 @@
   ],
   "overrides": {
     "tar": "^7.5.22"
+  },
+  "optionalDependencies": {
+    "node-llama-cpp": "^3.22.3"
   }
 }

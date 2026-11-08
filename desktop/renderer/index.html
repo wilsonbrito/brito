@@ -15,11 +15,20 @@
       <input id="search" placeholder="Buscar sessões…" autocomplete="off" />
       <div class="section"><span>PROJETOS</span><button id="add-project" title="Adicionar pasta">＋</button></div>
       <div id="projects"></div>
+      <button id="theme-btn" title="Alternar tema (sistema → claro → escuro)">◐ Tema</button>
     </aside>
     <main>
-      <header id="topbar"><span id="title">Brito</span><span id="meta"></span></header>
+      <header id="topbar"><span id="title">Brito</span><span id="meta"></span>
+        <nav id="panel-btns"><button data-panel="skills">Skills</button><button data-panel="agents">Agentes</button><button data-panel="graph">Grafo</button><button data-panel="memory">Memória</button><button data-panel="files">Arquivos</button></nav>
+      </header>
+      <section id="panel" hidden>
+        <div id="panel-head"><div id="panel-tabs"></div><input id="panel-q" placeholder="Buscar…" autocomplete="off" /><button id="panel-x" title="Fechar (Esc)">✕</button></div>
+        <div id="panel-body"></div>
+      </section>
       <section id="chat"><div id="messages"></div></section>
       <footer>
+        <div id="todos" hidden></div>
+        <div id="pop" hidden></div>
         <div id="composer">
           <textarea id="input" rows="1" placeholder="O que vamos construir?"></textarea>
           <div id="controls">
@@ -56,9 +65,12 @@
   </div>
   <div id="modal" hidden><div class="card">
     <h3>Permissão</h3><pre id="modal-text"></pre>
-    <div class="row"><button id="deny">Negar</button><button id="allow" class="primary">Permitir</button></div>
+    <div class="row"><button id="deny">Negar</button><button id="allow-project" title="Lembrar para este projeto">Sempre neste projeto</button><button id="allow-session" title="Não perguntar de novo para este tipo de ação nesta sessão">Permitir nesta sessão</button><button id="allow" class="primary">Permitir</button></div>
   </div></div>
+  <div id="palette" hidden><div id="pal-box"><input id="pal-in" placeholder="Digite um comando ou o nome de uma sessão…" autocomplete="off" /><div id="pal-list"></div></div></div>
   <script src="markdown.js"></script>
   <script src="app.js"></script>
+  <script src="panels.js"></script>
+  <script src="extras.js"></script>
 </body>
 </html>

@@ -33,6 +33,7 @@ export function buildSystemPrompt(root: string, graphStats: string, skills = "")
 - Edições e comandos shell pedem aprovação do usuário. Prefira edit_file a write_file. Verifique seu trabalho (typecheck/testes) via bash quando existir.
 - Para investigações amplas ou sub-tarefas grandes, use delegate: o subagente trabalha em contexto isolado e devolve só o resultado. Vários delegate somente-leitura (explore/plan) no mesmo turno rodam em paralelo. Passe \`focus\` com os símbolos relevantes. Não delegue o que resolve com 1–2 chamadas de graph_*.
 - SKILLS: procedimentos reutilizáveis aprendidos neste projeto. Se alguma se aplica à tarefa, chame skill_load ANTES de começar e siga-a. Se ela estiver errada ou incompleta, corrija com skill_save. Ao terminar tarefas complexas, o sistema pode propor novas skills; não crie skill para fatos de uma tarefa única.
+- Em tarefas com 3+ passos, mantenha a lista com todo_write: um item in_progress por vez, marcado completed assim que terminar. Leia um arquivo (read_file) antes de editá-lo; se ele mudou desde a leitura, leia de novo.
 - Seja conciso. Não repita conteúdo de arquivos na resposta.
 
 # Ambiente
@@ -41,7 +42,31 @@ Data: ${new Date().toISOString().slice(0, 10)}${shellNote()}${skills ? `\n\n# Sk
 }
 
 import type { AgentDef } from "./agents.js";
-import { skillsIndex } from "../skills/store.js";
+import { listSkills, skillsIndex } from "../skills/store.js";
+
+/**
+ * Repete o system prompt anterior enquanto `key()` não muda. O cache de prompt da API é um prefixo: qualquer byte
+ * diferente no system (a contagem de símbolos após um sync, a ordem das skills por uso) invalidaria o cache da
+ * conversa inteira a cada passo. A chave lista só o que muda o que o modelo deve fazer.
+ */
+export function memoSystem(key: () => string, build: () => string): () => string {
+  let last: string | undefined;
+  let value = "";
+  return () => {
+    const k = key();
+    if (k !== last) { last = k; value = build(); }
+    return value;
+  };
+}
+
+/**
+ * Chave do `memoSystem` da sessão principal: modo plano, grafo vazio ou não (o aviso de "grafo vazio" muda a
+ * orientação) e o conjunto de skills com o status. Contagens e ordem por uso ficam de fora de propósito.
+ */
+export function systemKey(root: string, planMode: boolean, graphEmpty: boolean): string {
+  const skills = listSkills(root).map((s) => `${s.name}:${s.scope}:${s.status}`).sort().join(",");
+  return `${planMode}|${graphEmpty}|${skills}`;
+}
 
 export function buildSubagentPrompt(root: string, def: AgentDef): string {
   return `${def.prompt}

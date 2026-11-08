@@ -45,12 +45,18 @@ function deleteSession(id) {
   persist(); renderAll();
 }
 
+/** Busca no título e no texto de toda a conversa (mensagens, respostas e comandos). */
+function matchesSession(s, q) {
+  if (s.title.toLowerCase().includes(q)) return true;
+  return s.items.some((it) => String(it.text ?? it.msg ?? (it.k === "tool" ? preview(it.name, it.input) : "")).toLowerCase().includes(q));
+}
+
 function renderSidebar() {
   const box = $("projects");
   box.innerHTML = "";
   const q = filter.toLowerCase();
   for (const p of state.projects) {
-    const list = state.sessions.filter((s) => s.project === p.path && (!q || s.title.toLowerCase().includes(q))).sort((a, b) => b.updated - a.updated);
+    const list = state.sessions.filter((s) => s.project === p.path && (!q || matchesSession(s, q))).sort((a, b) => b.updated - a.updated);
     if (q && !list.length) continue;
     const g = el("div", "proj");
     const h = el("div", "proj-h", `<span>${p.path === state.projects[0].path ? "⌂" : "▤"}</span><span></span><button class="add" title="Nova sessão neste projeto">＋</button>`);
@@ -87,43 +93,114 @@ function fold(key, summary, bodyEl) {
   return d;
 }
 
+const bump = (it) => { it.v = (it.v ?? 0) + 1; return it; };
+const lc = (n) => String(n ?? "").toLowerCase();
+const isEdit = (n) => ["edit_file", "edit"].includes(lc(n));
+const isWrite = (n) => ["write_file", "write"].includes(lc(n));
+
+/** Diff simples (sem LCS): o que saiu em vermelho, o que entrou em verde. */
+function diffEl(oldS, newS) {
+  const d = el("div", "diff");
+  const add = (cls, sign, text) => { for (const l of String(text).split("\n")) { const r = el("div", `dl ${cls}`); r.textContent = sign + " " + l; d.append(r); } };
+  if (oldS) add("del", "-", oldS);
+  add("add", "+", newS);
+  return d;
+}
+
+function toolEl(t, key) {
+  const i = t.input ?? {};
+  const file = i.path ?? i.file_path;
+  const mark = t.done ? (t.isError ? "✗" : "✓") : "…";
+  let detail = null;
+  if (isEdit(t.name) && typeof i.new_string === "string") detail = diffEl(i.old_string ?? "", i.new_string);
+  else if (isWrite(t.name) && typeof i.content === "string") detail = diffEl("", i.content.length > 6000 ? i.content.slice(0, 6000) + "\n…" : i.content);
+  const out = t.output ? (() => { const o = el("div", "out"); o.textContent = t.output.slice(0, 8000); return o; })() : null;
+  if (lc(t.name) === "delegate" && i.agent) {
+    const info = el("div", "sub");
+    info.textContent = `${i.agent}: ${String(i.task ?? "").replace(/\s+/g, " ").slice(0, 400)}`;
+    detail = info;
+  }
+  if (!detail && !out) { const row = el("div", "tool" + (t.isError ? " err" : "")); row.textContent = `${mark} ${t.name} ${preview(t.name, t.input)}`; return row; }
+  const body = el("div");
+  if (detail) body.append(detail);
+  if (out) body.append(out);
+  const title = lc(t.name) === "delegate" && i.agent ? `${mark} subagente ${i.agent}` : `${mark} ${t.name} ${file ?? preview(t.name, t.input)}`;
+  const d = fold(key, title, body);
+  d.classList.add("toolcard"); if (t.isError) d.classList.add("err");
+  return d;
+}
+
+const nodeCache = new WeakMap(); // item (ou 1º item do grupo) → { ver, node }
+const cached = (anchor, ver, build) => {
+  const c = nodeCache.get(anchor);
+  if (c && c.ver === ver) return c.node;
+  const node = build();
+  nodeCache.set(anchor, { ver, node });
+  return node;
+};
+const emptyNode = el("div", "empty", "<h1>Brito</h1><div>O que vamos construir?</div>");
+const spinNode = el("div", "note spin", "Trabalhando");
+
 function renderMessages() {
   const s = active();
   const box = $("messages");
   const chat = $("chat");
   const atBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 80;
-  box.innerHTML = "";
-  if (!s || !s.items.length) {
-    box.append(el("div", "empty", "<h1>Brito</h1><div>O que vamos construir?</div>"));
-  } else {
+  const nodes = [];
+  if (!s || !s.items.length) nodes.push(emptyNode);
+  else {
     let i = 0;
     while (i < s.items.length) {
       const it = s.items[i];
       const key = `${s.id}:${i}`;
-      if (it.k === "user") { const d = el("div", "user"); d.textContent = it.text; box.append(d); i++; }
-      else if (it.k === "text") { box.append(el("div", "text", renderMarkdown(it.text))); i++; }
-      else if (it.k === "thinking") { const p = el("div", "out"); p.textContent = it.text; box.append(fold(key, "Pensou", p)); i++; }
+      if (it.k === "user") nodes.push(cached(it, it.v, () => { const d = el("div", "user"); d.textContent = it.text; return d; })), i++;
+      else if (it.k === "text") nodes.push(cached(it, it.v, () => el("div", "text", renderMarkdown(it.text)))), i++;
+      else if (it.k === "thinking") nodes.push(cached(it, `${it.v}:${openFolds.has(key)}`, () => { const p = el("div", "out"); p.textContent = it.text; return fold(key, "Pensou", p); })), i++;
       else if (it.k === "tool") {
         const group = [];
         const start = i;
         while (i < s.items.length && s.items[i].k === "tool") group.push(s.items[i++]);
-        const body = el("div");
-        for (const t of group) {
-          const row = el("div", "tool" + (t.isError ? " err" : ""));
-          row.textContent = `${t.done ? (t.isError ? "✗" : "✓") : "…"} ${t.name} ${preview(t.name, t.input)}`;
-          body.append(row);
-          if (t.output) { const o = el("div", "out"); o.textContent = t.output.slice(0, 1500); body.append(o); }
-        }
-        const running = group.some((t) => !t.done);
-        box.append(fold(`${s.id}:${start}`, `${running ? "Executando" : "Executou"} ${group.length} ${group.length === 1 ? "comando" : "comandos"}`, body));
-      } else { const n = el("div", `note ${it.k}`); n.textContent = it.msg; box.append(n); i++; }
+        nodes.push(cached(group[0], group.map((t) => t.v ?? 0).join(",") + `:${group.length}`, () => {
+          const body = el("div");
+          group.forEach((t, j) => body.append(toolEl(t, `${s.id}:${start + j}`)));
+          const running = group.some((t) => !t.done);
+          return fold(`${s.id}:${start}`, `${running ? "Executando" : "Executou"} ${group.length} ${group.length === 1 ? "comando" : "comandos"}`, body);
+        }));
+      } else { nodes.push(cached(it, it.v, () => { const n = el("div", `note ${it.k}`); n.textContent = it.msg; return n; })); i++; }
     }
-    if (runtime(s.id).busy) box.append(el("div", "note spin", "Trabalhando"));
+    if (runtime(s.id).busy) nodes.push(spinNode);
   }
+  // reconcilia no lugar: nós reaproveitados não são recriados (mantém seleção de texto e scroll)
+  nodes.forEach((n, idx) => { if (box.children[idx] !== n) box.insertBefore(n, box.children[idx] ?? null); });
+  while (box.children.length > nodes.length) box.lastElementChild.remove();
   if (atBottom) chat.scrollTop = chat.scrollHeight;
+}
+let renderQueued = false;
+const scheduleMessages = () => { if (renderQueued) return; renderQueued = true; requestAnimationFrame(() => { renderQueued = false; renderMessages(); }); };
+
+/** Painel fixo com a última lista do todo_write da sessão (Claude CLI manda TodoWrite). */
+function renderTodos() {
+  const s = active();
+  const box = $("todos");
+  const last = s && [...s.items].reverse().find((x) => x.k === "tool" && ["todo_write", "todowrite"].includes(lc(x.name)));
+  const todos = last?.input?.todos;
+  if (!Array.isArray(todos) || !todos.length) { box.hidden = true; return; }
+  const done = todos.filter((t) => t.status === "completed").length;
+  if (done === todos.length && !runtime(s.id).busy) { box.hidden = true; return; } // tudo pronto: some sozinho
+  box.hidden = false;
+  box.replaceChildren();
+  const h = el("div", "todos-h"); h.textContent = `Tarefas ${done}/${todos.length}`;
+  const bar = el("div", "todos-bar"); const fill = el("i"); fill.style.width = `${(done / todos.length) * 100}%`; bar.append(fill);
+  box.append(h, bar);
+  for (const t of todos) {
+    const r = el("div", `todo ${t.status}`);
+    r.textContent = `${t.status === "completed" ? "✓" : t.status === "in_progress" ? "▸" : "○"} ${t.content ?? t.activeForm ?? ""}`;
+    box.append(r);
+  }
 }
 
 function renderTop() {
+  renderTodos();
   const s = active();
   const r = s && runtime(s.id);
   $("title").textContent = s?.title ?? "Brito";
@@ -134,7 +211,14 @@ function renderTop() {
   const set = s?.settings ?? state.settings;
   $("mode").value = set.mode; $("model").value = set.model; $("effort").value = set.effort; $("orch").value = set.orch ?? "";
   const b = r?.backend ?? "off";
-  $("st-backend").innerHTML = b === "on" ? `<span class="ok">●</span> Conectado · ${r?.engine === "api" ? "API" : "assinatura"}${r?.fallback ? ` · ${String(r.model).replace(/[<>&"]/g, "")} (fallback)` : ""}` : b === "starting" ? '<span class="bad">●</span> Iniciando backend…' : "○ Backend parado";
+  const stb = $("st-backend");
+  stb.replaceChildren();
+  if (b === "on") {
+    const dot = el("span", "ok"); dot.textContent = "●";
+    stb.append(dot, ` Conectado · ${r?.engine === "api" ? "API" : "assinatura"}`);
+    if (r?.chip) { const c = el("span", "chip" + (r.fallback ? " fb" : "")); c.textContent = r.chip; c.title = "Motor em uso. Envie /fallback para detalhes."; stb.append(c); }
+  } else if (b === "starting") { const d = el("span", "bad"); d.textContent = "●"; stb.append(d, " Iniciando backend…"); }
+  else stb.textContent = "○ Backend parado";
   $("st-dir").textContent = s ? projectOf(s)?.path ?? "" : "";
   const u = r?.usage;
   $("st-usage").textContent = u ? `${fmtK(u.contextTokens)} contexto${u.costUsd ? ` · $${u.costUsd.toFixed(2)}` : ""}` : "";
@@ -143,29 +227,62 @@ function renderTop() {
 function renderAll() { renderSidebar(); renderMessages(); renderTop(); }
 
 // ---------- backend ----------
+const PROTOCOL = 2; // igual a src/desktop/protocol.ts
 const note = (s, k, msg) => s.items.push({ k, msg });
+
+/** Consulta ao backend (arquivos, comandos, modelos): resposta chega como evento "result" com o mesmo id. */
+const pendingQ = new Map();
+function query(sessionId, q, arg, timeout = 4000) {
+  return new Promise((resolve) => {
+    const id = uid();
+    pendingQ.set(id, resolve);
+    api.write(sessionId, { t: "query", id, q, arg });
+    setTimeout(() => { if (pendingQ.delete(id)) resolve(q === "skills" || q === "symbols" ? null : []); }, timeout);
+  });
+}
+function action(sessionId, op, arg) {
+  return new Promise((resolve) => {
+    const id = uid();
+    pendingQ.set(id, resolve);
+    api.write(sessionId, { t: "action", id, op, arg });
+    setTimeout(() => { if (pendingQ.delete(id)) resolve({ ok: false, msg: "tempo esgotado" }); }, 60000);
+  });
+}
+let modelsLoaded = false;
+async function loadModels(sessionId) {
+  if (modelsLoaded) return;
+  modelsLoaded = true;
+  const m = await query(sessionId, "models");
+  const sel = $("model");
+  for (const name of m?.profiles ?? []) if (![...sel.options].some((o) => o.value === name)) sel.add(new Option(name, name));
+  renderTop();
+}
 
 function onEvent(sessionId, ev) {
   const s = state.sessions.find((x) => x.id === sessionId);
   if (!s) return;
   const r = runtime(sessionId);
   switch (ev.t) {
-    case "ready": r.backend = "on"; r.engine = ev.engine; r.model = ev.model; r.fallback = !!ev.fallback; if (s.claudeId !== ev.sessionId) s.claudeId = ev.sessionId; break;
+    case "hello": if (ev.protocol !== PROTOCOL) note(s, "warn", `App e CLI desalinhados (protocolo ${PROTOCOL} no app, ${ev.protocol} na CLI): rode \`npm run bundle\` ou atualize o app.`); break;
+    case "result": { const f = pendingQ.get(ev.id); pendingQ.delete(ev.id); f?.(ev.data); return; }
+    case "ready": r.backend = "on"; r.engine = ev.engine; r.model = ev.model; r.fallback = !!ev.fallback; r.chip = ev.chip; if (s.claudeId !== ev.sessionId) s.claudeId = ev.sessionId; loadModels(sessionId); break;
     case "turnStart": r.busy = true; break;
-    case "text": s.items.push({ k: "text", text: ev.text }); break;
-    case "thinking": s.items.push({ k: "thinking", text: ev.text }); break;
+    // os pedaços do mesmo bloco se juntam num item só (streaming); textEnd fecha o bloco
+    case "text": { const l = s.items[s.items.length - 1]; if (l?.k === "text" && l.open) { l.text += ev.text; bump(l); } else s.items.push({ k: "text", text: ev.text, open: true }); break; }
+    case "textEnd": { const l = s.items[s.items.length - 1]; if (l?.k === "text") l.open = false; break; }
+    case "thinking": { const l = s.items[s.items.length - 1]; if (l?.k === "thinking") { l.text += ev.text; bump(l); } else s.items.push({ k: "thinking", text: ev.text }); break; }
     case "toolStart": s.items.push({ k: "tool", id: ev.id, name: ev.name, input: ev.input, done: false }); break;
-    case "toolEnd": { const t = s.items.find((x) => x.k === "tool" && x.id === ev.id); if (t) { t.done = true; t.isError = ev.isError; t.output = ev.output; } break; }
+    case "toolEnd": { const t = s.items.find((x) => x.k === "tool" && x.id === ev.id); if (t) { t.done = true; t.isError = ev.isError; t.output = ev.output; bump(t); } break; }
     case "info": break;
     case "warn": case "error": note(s, ev.t, ev.msg); break;
     case "approval": r.approvals.push(ev); if (sessionId === state.activeId) showApproval(); break;
     case "turnEnd": r.busy = false; s.updated = Date.now(); break;
-    case "usage": r.usage = { contextTokens: ev.contextTokens, costUsd: ev.costUsd }; r.model = ev.model; r.fallback = !!ev.fallback; if (ev.sessionId) s.claudeId = ev.sessionId; break;
-    case "closed": r.backend = "off"; r.busy = false; for (const t of s.items) if (t.k === "tool" && !t.done) { t.done = true; t.isError = true; } break;
+    case "usage": r.usage = { contextTokens: ev.contextTokens, costUsd: ev.costUsd }; r.model = ev.model; r.fallback = !!ev.fallback; r.chip = ev.chip; if (ev.sessionId) s.claudeId = ev.sessionId; break;
+    case "closed": r.backend = "off"; if (r.busy || (ev.code && ev.code !== 0)) note(s, "warn", `O backend encerrou${ev.code ? ` (código ${ev.code})` : ""}. Envie outra mensagem para reconectar; a conversa é retomada.`); r.busy = false; for (const t of s.items) { if (t.k === "text") t.open = false; if (t.k === "tool" && !t.done) { t.done = true; t.isError = true; bump(t); } } break;
   }
   persist();
-  renderSidebar();
-  if (sessionId === state.activeId) { renderMessages(); renderTop(); }
+  if (ev.t !== "text" && ev.t !== "thinking") renderSidebar();
+  if (sessionId === state.activeId) { scheduleMessages(); if (ev.t !== "text" && ev.t !== "thinking") renderTop(); }
 }
 
 async function ensureBackend(s) {
@@ -199,32 +316,145 @@ function showApproval() {
   const r = s && runtime(s.id);
   const a = r?.approvals[0];
   $("modal").hidden = !a;
-  if (a) $("modal-text").textContent = a.text;
+  if (a) {
+    $("allow-session").hidden = $("allow-project").hidden = !!a.force; // plano/skill sempre perguntam
+    // linhas "- x"/"+ x" do describe de edit_file viram diff colorido
+    const box = $("modal-text");
+    box.replaceChildren();
+    for (const l of a.text.split("\n")) {
+      const d = el("div", /^\s*-\s/.test(l) ? "dl del" : /^\s*\+\s/.test(l) ? "dl add" : "");
+      d.textContent = l || " ";
+      box.append(d);
+    }
+    $("allow").focus();
+  }
 }
-function answer(allow) {
+function answer(allow, scope) {
   const s = active();
   const a = runtime(s.id).approvals.shift();
-  if (a) api.write(s.id, { t: "approve", id: a.id, allow });
+  if (a) api.write(s.id, { t: "approve", id: a.id, allow, ...(scope && !a.force ? { scope } : {}) });
   showApproval();
 }
 
 // ---------- ligações ----------
+// ---------- paleta "/" (comandos e skills) e "@" (arquivos) ----------
+const LOCAL_CMDS = [
+  { name: "clear", description: "limpa a conversa", kind: "builtin" },
+  { name: "fallback", description: "estado do fallback Claude → modelo local", kind: "builtin" },
+  { name: "help", description: "lista os comandos", kind: "builtin" },
+];
+const pop = { items: [], idx: 0, from: 0, kind: "" };
+function closePop() { $("pop").hidden = true; pop.items = []; }
+function drawPop() {
+  const box = $("pop");
+  box.replaceChildren();
+  pop.items.forEach((it, i) => {
+    const row = el("div", "opt" + (i === pop.idx ? " on" : ""));
+    const n = el("span", "n"); n.textContent = pop.kind === "/" ? "/" + it.name : it.name ?? it;
+    row.append(n);
+    if (it.description) { const d = el("span", "d"); d.textContent = it.description; row.append(d); }
+    row.onmousedown = (e) => { e.preventDefault(); pop.idx = i; acceptPop(); };
+    box.append(row);
+  });
+  box.hidden = !pop.items.length;
+  box.querySelector(".on")?.scrollIntoView({ block: "nearest" });
+}
+function acceptPop() {
+  const it = pop.items[pop.idx];
+  if (!it) return;
+  const inp = $("input");
+  const ins = pop.kind === "/" ? `/${it.name} ` : `@${it} `;
+  inp.value = inp.value.slice(0, pop.from) + ins + inp.value.slice(inp.selectionStart);
+  inp.selectionStart = inp.selectionEnd = pop.from + ins.length;
+  closePop(); autosize(); inp.focus();
+}
+let popSeq = 0;
+async function updatePop() {
+  const inp = $("input");
+  const before = inp.value.slice(0, inp.selectionStart);
+  const at = before.match(/(?:^|\s)@([^\s@]*)$/);
+  const sl = before.match(/^\/([^\s/]*)$/);
+  const s = active();
+  if (!s || (!at && !sl)) return closePop();
+  const seq = ++popSeq;
+  pop.kind = at ? "@" : "/";
+  pop.from = before.length - (at ? at[1].length + 1 : sl[1].length + 1);
+  const arg = (at ? at[1] : sl[1]).toLowerCase();
+  let items;
+  if (sl && runtime(s.id).backend !== "on") items = LOCAL_CMDS.filter((c) => c.name.includes(arg)); // sem subir o backend só para listar
+  else {
+    if (!(await ensureBackend(s))) return closePop();
+    items = await query(s.id, at ? "files" : "commands", arg);
+  }
+  if (seq !== popSeq) return; // chegou resposta mais velha
+  pop.items = (items ?? []).slice(0, 30); pop.idx = 0; drawPop();
+}
+
+const hist = []; let histPos = -1;
+async function clearSession() {
+  const s = active();
+  if (!s) return;
+  s.items = []; s.title = "Nova sessão"; s.claudeId = null;
+  if (runtime(s.id).backend === "on") api.write(s.id, { t: "reset" });
+  persist(); renderAll();
+}
 $("send").onclick = () => {
   const s = active();
   if (s && runtime(s.id).busy) return api.write(s.id, { t: "abort" });
   const t = $("input").value;
   $("input").value = ""; autosize();
+  if (t.trim()) { hist.push(t); histPos = -1; }
+  if (t.trim() === "/clear") return clearSession();
+  if (t.trim() === "/help" && s) {
+    note(s, "info", "/ abre comandos e skills · @ procura arquivos do projeto · arraste arquivos para o campo · ↑/↓ histórico · Esc interrompe · Ctrl+N nova sessão · /clear limpa · /fallback mostra o motor");
+    persist(); return renderAll();
+  }
   sendMessage(t);
 };
 $("input").addEventListener("keydown", (e) => {
+  const inp = e.target;
+  if (!$("pop").hidden) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { pop.idx = (pop.idx + (e.key === "ArrowDown" ? 1 : pop.items.length - 1)) % pop.items.length; drawPop(); e.preventDefault(); return; }
+    if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !e.isComposing)) { acceptPop(); e.preventDefault(); return; }
+    if (e.key === "Escape") { closePop(); e.preventDefault(); return; }
+  }
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("send").click(); }
+  else if (e.key === "Escape") { const s = active(); if (s && runtime(s.id).busy) api.write(s.id, { t: "abort" }); }
+  else if (e.key === "ArrowUp" && hist.length && !inp.value.slice(0, inp.selectionStart).includes("\n")) {
+    histPos = histPos < 0 ? hist.length - 1 : Math.max(0, histPos - 1);
+    inp.value = hist[histPos]; autosize(); e.preventDefault();
+  } else if (e.key === "ArrowDown" && histPos >= 0) {
+    histPos++; inp.value = histPos >= hist.length ? "" : hist[histPos]; if (histPos >= hist.length) histPos = -1; autosize(); e.preventDefault();
+  }
+});
+// botão "copiar" dos blocos de código (delegação: a CSP não permite onclick inline)
+$("messages").addEventListener("click", (e) => {
+  const b = e.target.closest?.(".copy");
+  if (!b) return;
+  navigator.clipboard.writeText(b.parentElement.querySelector("code").textContent);
+  b.textContent = "copiado"; setTimeout(() => (b.textContent = "copiar"), 1200);
 });
 const autosize = () => { const i = $("input"); i.style.height = "auto"; i.style.height = Math.min(i.scrollHeight, 220) + "px"; };
-$("input").addEventListener("input", autosize);
+$("input").addEventListener("input", () => { autosize(); updatePop(); });
+$("input").addEventListener("blur", () => setTimeout(closePop, 100));
+// arrastar arquivos para o campo vira @caminho (o agente os lê com as ferramentas)
+const comp = $("composer");
+comp.addEventListener("dragover", (e) => { e.preventDefault(); comp.classList.add("drop"); });
+comp.addEventListener("dragleave", () => comp.classList.remove("drop"));
+comp.addEventListener("drop", (e) => {
+  e.preventDefault(); comp.classList.remove("drop");
+  const paths = [...(e.dataTransfer?.files ?? [])].map((f) => api.pathOf(f)).filter(Boolean);
+  if (!paths.length) return;
+  const inp = $("input");
+  inp.value += (inp.value && !/\s$/.test(inp.value) ? " " : "") + paths.map((p) => "@" + (/\s/.test(p) ? `"${p}"` : p)).join(" ") + " ";
+  autosize(); inp.focus();
+});
 $("new-session").onclick = () => newSession();
 $("add-project").onclick = addProject;
 $("search").oninput = (e) => { filter = e.target.value; renderSidebar(); };
 $("allow").onclick = () => answer(true);
+$("allow-session").onclick = () => answer(true, "session");
+$("allow-project").onclick = () => answer(true, "project");
 $("deny").onclick = () => answer(false);
 document.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "n") { e.preventDefault(); newSession(); } });
 for (const k of ["mode", "model", "effort", "orch"]) {
@@ -244,7 +474,7 @@ for (const k of ["mode", "model", "effort", "orch"]) {
   if (saved) state = { ...state, ...saved };
   if (!state.projects.length) state.projects.push({ path: env.home, name: "Home" });
   // Sessões de uma execução anterior não têm backend vivo; marca ferramentas penduradas como interrompidas.
-  for (const s of state.sessions) { s.settings ??= { ...state.settings }; for (const t of s.items) if (t.k === "tool" && !t.done) { t.done = true; t.isError = true; } }
+  for (const s of state.sessions) { s.settings ??= { ...state.settings }; for (const t of s.items) { if (t.k === "text") t.open = false; if (t.k === "tool" && !t.done) { t.done = true; t.isError = true; } } }
   api.onEvent(onEvent);
   if (!env.cli) $("st-backend").textContent = "dist/cli.bundle.mjs não encontrado: rode `npm run bundle`.";
   if (!state.sessions.some((s) => s.id === state.activeId)) state.activeId = state.sessions[0]?.id ?? null;
