@@ -2,10 +2,10 @@
 name: publicar-release-npm
 description: Como fechar e publicar uma versão do brito-cli no npm: bump de versão, CHANGELOG/README, typecheck, testes, dry-run do pacote, checar login e publicar.
 version: 1
-uses: 0
+uses: 1
 created: 2026-10-30
 updated: 2026-10-30
-lastUsed: 2026-10-30
+lastUsed: 2026-11-08
 refs: package.json, CHANGELOG.md, README.md
 status: active
 origin: manual
