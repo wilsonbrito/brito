@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { providerFor } from "../provider/index.js";
 
-type Msg = Anthropic.MessageParam;
+import type { Msg } from "../provider/types.js";
 
 /** Imagem em base64 tem megabytes, mas custa ~1,6 mil tokens: troca o conteúdo por um marcador antes de medir ou resumir. */
 const stubImages = (_k: string, v: any) => (v && typeof v === "object" && (v.type === "image" || v.type === "document") && v.source ? { type: v.type, note: "x".repeat(6400) } : v);
