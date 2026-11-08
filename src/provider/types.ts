@@ -4,7 +4,8 @@ import type Anthropic from "@anthropic-ai/sdk";
  * Formato interno das mensagens: o da API da Anthropic (tool_use / tool_result). Histórico, reflexão de skills e
  * reparo após Ctrl+C dependem dele; cada provedor traduz na borda.
  */
-export type Msg = Anthropic.MessageParam;
+/** O loop só fala user/assistant (no SDK 1.x `MessageParam` também inclui `system`). */
+export type Msg = Anthropic.UserMessageParam | Anthropic.AssistantMessageParam;
 
 /** Blocos que um provedor devolve: só texto e chamadas de tool (raciocínio não entra no histórico). */
 export type OutBlock = { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: unknown };
