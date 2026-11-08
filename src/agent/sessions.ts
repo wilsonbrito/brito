@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type Anthropic from "@anthropic-ai/sdk";
+import type { Msg } from "../provider/types.js";
 import type { Todo } from "../util/todos.js";
 
 /**
@@ -18,7 +19,7 @@ export interface SavedSession {
   title: string;
   createdAt: string;
   updatedAt: string;
-  messages?: Anthropic.MessageParam[];
+  messages?: Msg[];
   todos?: Todo[];
 }
 
@@ -31,13 +32,13 @@ const fileOf = (root: string, id: string) => {
   return path.join(sessionsDir(root), `${id}.json`);
 };
 
-const stripImages = (msgs: Anthropic.MessageParam[]): Anthropic.MessageParam[] =>
+const stripImages = (msgs: Msg[]): Msg[] =>
   msgs.map((m) => typeof m.content === "string" ? m : {
     ...m,
     content: m.content.map((b) => (b.type === "image" || b.type === "document" ? { type: "text" as const, text: "[anexo omitido ao salvar a sessão]" } : b)),
-  } as Anthropic.MessageParam);
+  } as Msg);
 
-export function titleOf(msgs: Anthropic.MessageParam[] | undefined, fallback = ""): string {
+export function titleOf(msgs: Msg[] | undefined, fallback = ""): string {
   const first = msgs?.find((m) => m.role === "user");
   const text = typeof first?.content === "string" ? first.content : first?.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(" ") ?? fallback;
   return (text || fallback).replace(/\s+/g, " ").trim().slice(0, 80);
@@ -97,7 +98,7 @@ function prune(root: string) {
  * Histórico salvo pronto para reenviar: se o processo caiu no meio de um turno, o último `tool_use` pode ter ficado sem
  * `tool_result`, e a API recusaria a conversa. Fecha cada um com erro, como no Ctrl+C.
  */
-export function repairHistory(msgs: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
+export function repairHistory(msgs: Msg[]): Msg[] {
   const last = msgs[msgs.length - 1];
   if (last?.role !== "assistant" || typeof last.content === "string") return msgs;
   const pending = last.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");

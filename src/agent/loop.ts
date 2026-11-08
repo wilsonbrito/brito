@@ -6,7 +6,7 @@ import type { TurnSink } from "./sink.js";
 import { initialEffort, initialModel } from "../model.js";
 import { providerFor } from "../provider/index.js";
 import { compactAtFor, resolveModel } from "../provider/resolve.js";
-import type { ModelMessage, OutBlock, SendHooks } from "../provider/types.js";
+import type { ModelMessage, Msg, OutBlock, SendHooks } from "../provider/types.js";
 import { fallbackStatus } from "../engine.js";
 import { activateFallback, classifyAnthropicError, fallbackExpired, fallbackUntil, fallbackWarning, returnToPrimary, shortError, triggersFallback, type FallbackState } from "../provider/fallback.js";
 import { fmtBytes, findImages, imageBlock, splitOversize } from "../util/images.js";
@@ -29,14 +29,14 @@ export interface AgentOptions {
 
 /** Registro do último turno, usado pela reflexão que cria/melhora skills. */
 export interface TurnRecord {
-  messages: Anthropic.MessageParam[];
+  messages: Msg[];
   toolCalls: number;
   errors: number;
   finished: boolean;
 }
 
 export class Agent {
-  messages: Anthropic.MessageParam[] = [];
+  messages: Msg[] = [];
   usage = { input: 0, output: 0, cacheRead: 0, steps: 0 };
   /** tamanho do contexto na última requisição (alimenta a barra de status) */
   contextTokens = 0;
@@ -83,7 +83,7 @@ export class Agent {
     this.lastTurn = turn;
     this.recentTurns = [...this.recentTurns, turn].slice(-3);
     this.unsentTurns.push(turn);
-    const push = (m: Anthropic.MessageParam) => { this.messages.push(m); turn.messages.push(m); };
+    const push = (m: Msg) => { this.messages.push(m); turn.messages.push(m); };
     // Imagens arrastadas para o terminal chegam como caminhos no texto: anexa como blocos `image`. O registro do turno
     // (usado na reflexão) guarda só o texto, para não carregar base64.
     const { ok, tooBig } = splitOversize(findImages(userText, this.ctx.root));
