@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-14, kind: macos }          # Apple Silicon
+          - { os: macos-latest, kind: macos }      # Apple Silicon (macos-14 deixou de ser suportado)
           - { os: macos-15-intel, kind: macos }    # Intel
           - { os: ubuntu-latest, kind: linux }
           - { os: windows-latest, kind: windows }
