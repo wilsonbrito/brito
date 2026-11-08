@@ -21,7 +21,7 @@
     "release": "node scripts/release.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^1.3.0",
+    "@anthropic-ai/sdk": "^1.5.0",
     "@ladybugdb/core": "^0.22.3",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "commander": "^14.0.3",
