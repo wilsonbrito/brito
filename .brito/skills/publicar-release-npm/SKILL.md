@@ -9,7 +9,7 @@ lastUsed: 2026-11-08
 refs: package.json, CHANGELOG.md, README.md
 status: active
 origin: manual
-wins: 0
+wins: 1
 losses: 0
 ---
 ## Quando usar
