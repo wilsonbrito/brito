@@ -44,6 +44,10 @@ export function describeClaudeTool(name: string, input: any): string {
     case "MultiEdit": return `editar ${i.file_path} (${(i.edits ?? []).length} trocas)`;
     case "NotebookEdit": return `editar notebook ${i.notebook_path}`;
     case "ExitPlanMode": return `plano proposto — aprovar e sair do modo plano?\n${String(i.plan ?? "")}`;
+    // Ação do implementador do modo orquestrador (servidor MCP): a pergunta já vem montada pelo Brito.
+    case "BritoImplementer": return `implementador · ${String(i.question ?? "")}`;
+    case "mcp__brito__spec_save": return `gravar spec/${String(i.feature ?? "?")}/${String(i.file ?? "?")} (${String(i.content ?? "").length} chars)`;
+    case "mcp__brito__implement": return `delegar ao implementador: ${one(i.task, 300)}${i.verify ? `\n  verificação: ${one(i.verify)}` : ""}`;
     default: return `${name}: ${one(JSON.stringify(i), 200)}`;
   }
 }

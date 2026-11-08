@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 const api = window.brito;
 
-let state = { projects: [], sessions: [], activeId: null, settings: { model: "", effort: "", mode: "manual" } };
+let state = { projects: [], sessions: [], activeId: null, settings: { model: "", effort: "", mode: "manual", orch: "" } };
 const rt = new Map(); // sessionId → { busy, backend: "off"|"starting"|"on", usage, approvals: [] }
 const openFolds = new Set();
 let filter = "";
@@ -209,7 +209,7 @@ function renderTop() {
   $("send").classList.toggle("stop", !!r?.busy);
   $("send").title = r?.busy ? "Interromper" : "Enviar (Enter)";
   const set = s?.settings ?? state.settings;
-  $("mode").value = set.mode; $("model").value = set.model; $("effort").value = set.effort;
+  $("mode").value = set.mode; $("model").value = set.model; $("effort").value = set.effort; $("orch").value = set.orch ?? "";
   const b = r?.backend ?? "off";
   const stb = $("st-backend");
   stb.replaceChildren();
@@ -457,7 +457,7 @@ $("allow-session").onclick = () => answer(true, "session");
 $("allow-project").onclick = () => answer(true, "project");
 $("deny").onclick = () => answer(false);
 document.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "n") { e.preventDefault(); newSession(); } });
-for (const k of ["mode", "model", "effort"]) {
+for (const k of ["mode", "model", "effort", "orch"]) {
   $(k).onchange = (e) => {
     const s = active();
     if (!s) return;

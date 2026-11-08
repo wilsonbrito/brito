@@ -262,6 +262,15 @@ Com o Claude como modelo principal (API ou `claude` CLI), o perfil `qwen` é o f
   estado     inativo — troca automática se o Claude falhar por limite, crédito, auth ou sobrecarga
 ```
 
+### Modo orquestrador: o Claude planeja, o Qwen implementa
+
+`/orquestrar on` mantém o Claude como modelo principal, mas passa a implementação para um perfil de endpoint (`qwen` por padrão). O Claude grava a spec e a lista de tasks em `spec/<feature>/spec.md` e `spec/<feature>/tasks.md` (tool `spec_save`), espera sua aprovação e só então manda uma task por vez para a tool `implement`, marcando no `tasks.md` as que passaram na revisão. Ele perde as tools de edição (`write_file`/`edit_file`, ou `Edit`/`Write`/`MultiEdit`/`NotebookEdit` no modo `claude` CLI): a única escrita dele é a `spec_save`, que só grava esses dois arquivos. Fica com a leitura, o grafo e o `bash` para conferir o trabalho.
+
+- O implementador roda em contexto isolado (não vê a conversa), com o grafo dos símbolos passados em `focus`. As edições e comandos dele seguem o modo de permissão e, no modo `claude` CLI, são aprovados no terminal como os do Claude.
+- Quando ele termina, a própria tool anexa `git status --short`, `git diff --stat` e a saída do comando `verify` da task: o Claude julga pelo que mudou no disco, não pelo relato do implementador.
+- `/orquestrar` mostra o estado; `/orquestrar off` desliga; `/orquestrar modelo <perfil>` escolhe outro perfil implementador (também `BRITO_IMPL_MODEL` ou `implModel` no config). Os dois combinam: `/orquestrar on modelo qwen`. Com `--global`, o que foi pedido fica salvo no config: `/orquestrar on --global` liga o modo sempre que o Brito abrir (`orchestrator: true`), e `/orquestrar off --global` desfaz. A barra de status mostra `⚙ →qwen` enquanto o modo está ligado. No app de desktop, use o seletor "Implementa".
+- Só liga com o perfil válido, a chave no ambiente e um modelo principal diferente do implementador. Se o principal virar o Qwen (fallback ou `/model qwen`), o modo desliga com aviso.
+
 ## Configuração
 
 `BRITO_MODEL`, `BRITO_EFFORT`, `BRITO_EXPLORE_MODEL`, `BRITO_LEARN_MODEL`, `BRITO_HOME` (onde ficam skills globais e histórico), `BRITO_CONFIG`, `BRITO_COLOR`, `BRITO_BANNER` (`compact` ou `full`; padrão: tela cheia em janelas de 95+ colunas e 28+ linhas), `BRITO_INDEX_IGNORED`, `BRITO_SKILL_MIN_TOOLS` (tamanho mínimo do turno para disparar a reflexão quando nada mais dispara), `BRITO_SKILLS` (`auto` padrão, `ask`, `off`), `BRITO_SHELL` (shell da tool `bash`; no Windows usa o Git Bash se instalado).

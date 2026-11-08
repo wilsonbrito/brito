@@ -7,16 +7,19 @@ import "./tools/bash.js";
 import "./tools/graph.js";
 import "./tools/delegate.js";
 import "./tools/plan.js";
+import "./tools/implement.js";
+import "./tools/spec.js";
 import "./tools/todo.js";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { latestSession, listSessions, repairHistory, saveSession, titleOf, type SavedSession } from "./agent/sessions.js";
 import { PLAN_NOTE, perms } from "./permissions.js";
+import { ORCH_NOTE, implStatus, mainTools, orch, orchGuard, restoreOrch } from "./orchestrator.js";
 import { loadProjectAgents, listAgents } from "./agent/agents.js";
 import { GraphLockedError, GraphStore, openGraphAfterClaude } from "./graph/store.js";
 import { indexProject } from "./graph/indexer.js";
 import { Agent } from "./agent/loop.js";
-import { EFFORTS, MODEL_ALIASES, modelHelp, effortLabel, initialEffort, initialModel, loadProfiles, isEffort, loadReasoningDisplay, parseModelArgs, saveEffort, saveModel, saveReasoningDisplay, type Effort, type ModelScope } from "./model.js";
+import { EFFORTS, MODEL_ALIASES, modelHelp, effortLabel, initialEffort, initialModel, loadProfiles, loadSavedOrch, isEffort, loadReasoningDisplay, parseModelArgs, saveEffort, saveImplModel, saveModel, saveOrch, saveReasoningDisplay, type Effort, type ModelScope } from "./model.js";
 import { hasClaudeCli, historyForFallback, ClaudeSession } from "./agent/claude-cli.js";
 import { NO_ANTHROPIC, fallbackStatus, learnerModel, openEngine } from "./engine.js";
 import { activateFallback, chooseModel, cliShouldFallBack, fallbackWarning, newFallbackState, onceRestore, renderFallback, retryPrompt, type FallbackState } from "./provider/fallback.js";
@@ -406,6 +409,66 @@ function makeLearner(getTurns: () => TurnRecord[], ctx: ToolContext, complete: C
   };
 }
 
+/**
+ * `/orquestrar [on|off] [modelo <perfil>] [--global]`: o principal planeja e revisa, o perfil implementa pela tool
+ * `implement`. `on`/`off` e `modelo` combinam no mesmo comando; `--global` grava o que foi pedido no config
+ * (`orchestrator` e `implModel`), para valer ao abrir o Brito de novo.
+ */
+function orchestratorCommand(main: () => string) {
+  const usage = "  uso: /orquestrar on|off [modelo <perfil>] [--global] · /orquestrar modelo <perfil> [--global]";
+  return {
+    desc: "modo orquestrador: o modelo principal planeja e revisa, um perfil (qwen) implementa",
+    run: async (args: string[]) => {
+      const global = args.includes("--global");
+      const words = args.filter((a) => !a.startsWith("--"));
+      const st = () => implStatus(main(), orch.model, process.env);
+      if (!words.length) {
+        const s = st();
+        ui.print(`  ${c.soft("modo")} ${c.muted(`${orch.on ? "ligado" : "desligado"}${loadSavedOrch() ? " · liga ao abrir (salvo)" : ""}`)}`);
+        ui.print(`  ${c.soft("implementador")} ${c.muted(`${orch.model} · ${s.ready ? `${s.label} ✓ pronto` : `✗ ${s.reason}`}`)}`);
+        ui.print(c.muted(usage));
+        return;
+      }
+      const toggle = words.find((w) => w === "on" || w === "off");
+      const mi = words.indexOf("modelo");
+      const name = mi >= 0 ? words[mi + 1] : undefined;
+      const known = new Set([toggle, "modelo", name].filter(Boolean));
+      if ((mi >= 0 && !name) || words.some((w) => !known.has(w)) || words.filter((w) => w === "on" || w === "off").length > 1) {
+        ui.warn(`argumento desconhecido: ${args.join(" ")}`);
+        ui.print(c.muted(usage));
+        return;
+      }
+      // O implementador primeiro: `on modelo X` liga já com o X.
+      if (name) {
+        const key = name.trim().toLowerCase();
+        if (resolveModel(key).kind !== "openai") {
+          ui.error(`"${name}" não é um perfil de endpoint em providers no ~/.brito/config.json: o implementador é um perfil (ex.: qwen); o principal se troca com /model`);
+          return;
+        }
+        orch.model = key;
+        if (global) saveImplModel(key);
+        ui.info(`implementador: ${key}${global ? " (salvo)" : ""}`);
+      }
+      if (toggle === "off") {
+        orch.on = false;
+        if (global) saveOrch(false);
+        ui.info(`modo orquestrador desligado${global ? " (salvo)" : ""}: o modelo principal volta a editar`);
+        return;
+      }
+      if (toggle === "on") {
+        const s = st();
+        if (!s.ready) { ui.error(`modo orquestrador não ligou: ${s.reason}`); return; }
+        orch.on = true;
+        if (global) saveOrch(true);
+        ui.info(`modo orquestrador ligado${global ? " (salvo: liga ao abrir o Brito)" : ""}: ${main()} planeja e revisa, ${s.label} implementa`);
+        return;
+      }
+      const s = st();
+      if (orch.on && !s.ready) { orch.on = false; ui.warn(`modo orquestrador desligado: ${s.reason}`); }
+    },
+  };
+}
+
 /** Linhas da listagem de sessões (`brito sessoes`, `/sessions`): id, quando, motor e título. */
 function sessionLines(root: string, current?: string): string[] {
   return listSessions(root).slice(0, 20).map((s) => {
@@ -472,13 +535,13 @@ async function buildApiBackend(root: string, model: string, io: { ask: (q: strin
 
   const ctx: ToolContext = { root, graph, ask: (q, opts) => io.ask(q, opts), sync, dirty: false, loadedSkills: o.loadedSkills ?? new Set() };
   const fallback = o.fallback ?? newFallbackState(model);
-  // Refeito só quando muda o modo plano, o grafo deixa de estar vazio ou o conjunto de skills muda: um system
-  // estável mantém o cache de prompt da conversa (veja memoSystem).
+  // Refeito só quando muda o modo plano, o modo orquestrador, o grafo deixa de estar vazio ou o conjunto de skills muda:
+  // um system estável mantém o cache de prompt da conversa (veja memoSystem).
   const system = memoSystem(
-    () => systemKey(root, perms.mode === "plan", symCount + noteCount === 0),
-    () => buildSystemPrompt(root, graphStatsLine(symCount, noteCount, "now"), skillsIndex(root)) + (perms.mode === "plan" ? PLAN_NOTE : ""),
+    () => systemKey(root, perms.mode === "plan", symCount + noteCount === 0) + `|${orch.on}`,
+    () => buildSystemPrompt(root, graphStatsLine(symCount, noteCount, "now"), skillsIndex(root)) + (perms.mode === "plan" ? PLAN_NOTE : "") + (orch.on ? ORCH_NOTE : ""),
   );
-  const agent = new Agent(system, ctx, { model, fallback });
+  const agent = new Agent(system, ctx, { model, fallback, tools: mainTools });
   if (o.messages) agent.messages = o.messages;
   if (o.effort) agent.effort = o.effort as Effort;
   let sessionId = o.session?.id ?? randomUUID();
@@ -501,6 +564,7 @@ async function buildApiBackend(root: string, model: string, io: { ask: (q: strin
 
   const turn = async (text: string, signal: AbortSignal) => {
     ui.turnStart();
+    orchGuard(agent.model, (m) => ui.warn(m)); // `/model qwen` ou a troca do claude CLI para o qwen
     let ok = true;
     try { await agent.send(text, signal); }
     catch (e: any) { ok = false; signal.aborted ? ui.warn("⏹ interrompido") : ui.error(e?.message ?? String(e)); }
@@ -529,6 +593,7 @@ async function buildApiBackend(root: string, model: string, io: { ask: (q: strin
       "/model": modelCmd.cmd,
       "/fallback": fallbackCommand(fallback, () => agent.model, o.engineLabel ?? ((m) => (resolveModel(m).kind === "openai" ? "endpoint" : "API Anthropic"))),
       "/reasoning": reasoningCommand(() => agent.effort, (e) => { agent.effort = e; }),
+      "/orquestrar": orchestratorCommand(() => agent.model),
       "/tools": { desc: "ferramentas disponíveis", run: async () => { for (const t of allTools()) ui.print(`  ${ui.toolLabel(t.name)}${c.dim(t.dangerous ? "  (pede aprovação)" : "")}`); } },
       "/context": {
         desc: "uso da janela de contexto",
@@ -679,6 +744,7 @@ async function buildClaudeBackend(root: string, io: Io, sw: () => SwitchableBack
       "/model": modelCmd.cmd,
       "/fallback": fallbackCommand(fallback, () => session.model, () => "claude CLI · assinatura"),
       "/effort": effortCommand(() => session.effort, (e) => { session.effort = e; }),
+      "/orquestrar": orchestratorCommand(() => session.requestedModel || session.model),
       "/reasoning": reasoningCommand(() => session.effort, (e) => { session.effort = e; }),
       "/tools": { desc: "ferramentas do grafo/memória/skills", run: async () => { for (const n of mcpTools) ui.print(`  ${ui.toolLabel(n)}`); } },
       "/index": {
@@ -722,6 +788,7 @@ async function runViaClaude(root: string, promptParts: string[], yes: boolean, m
 
   sw = switchableBackend(claude.backend);
   ui.info("modo claude CLI: usa o login da sua conta; tools do grafo/memória/skills via MCP.");
+  restoreOrch(claude.session.requestedModel || claude.session.model, (m) => ui.warn(m), (m) => ui.info(m));
   await runRepl(sw, {
     root, yes, startedAt, io,
     banner: {
@@ -808,6 +875,7 @@ program
     }
 
     sw = switchableBackend(api.backend);
+    restoreOrch(api.agent.model, (m) => ui.warn(m), (m) => ui.info(m));
     await runRepl(sw, {
       root, yes: !!o.yes, startedAt, io,
       banner: {

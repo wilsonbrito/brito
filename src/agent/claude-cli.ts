@@ -8,6 +8,7 @@ import { MCP_NAME, MCP_PREFIX, APPROVE_TOOL } from "../mcp/server.js";
 import { ui as terminalUi } from "../ui/ui.js";
 import type { TurnSink } from "./sink.js";
 import { MODE_ENV, perms, type PermMode } from "../permissions.js";
+import { CLAUDE_EDIT_TOOLS, ORCH_MCP_TIMEOUT, ORCH_NOTE, ORCH_NOTE_CLAUDE, orch, orchEnv } from "../orchestrator.js";
 import { DEFAULT_MODEL, wireEffort } from "../model.js";
 import { subagentModel } from "../engine.js";
 import type { TurnRecord } from "./loop.js";
@@ -224,11 +225,13 @@ export class ClaudeSession {
 
   private args(text: string, imageDirs: string[] = []): string[] {
     const { root, approvalSock, stats, mcpCommand } = this.o;
-    const mcp = mcpConfig(mcpCommand, approvalSock, perms.mode, this.o.env);
+    // O modo orquestrador vale por turno, como o de permissão: o servidor MCP do turno sobe com ele no env.
+    const mcp = mcpConfig(mcpCommand, approvalSock, perms.mode, { ...this.o.env, ...orchEnv() });
     const readOnlyMcp = ["graph_search", "graph_callers", "graph_callees", "graph_impact", "graph_context", "graph_query", "graph_index", "remember", "recall", "skill_load", "digest"];
     const system = buildSystemPrompt(root, stats, skillsIndex(root)) +
       `\n\n# Nesta sessão\nAs tools do Brito chegam com o prefixo \`${MCP_PREFIX}\` (ex.: ${MCP_PREFIX}graph_context). Use-as como descrito acima. ` +
-      `read_file/grep/glob/edit_file/bash correspondem a Read/Grep/Glob/Edit/Bash, e \`delegate\` corresponde à tool Agent/Task com os subagentes configurados (explore, plan, general e os do projeto).`;
+      `read_file/grep/glob/edit_file/bash correspondem a Read/Grep/Glob/Edit/Bash, e \`delegate\` corresponde à tool Agent/Task com os subagentes configurados (explore, plan, general e os do projeto).` +
+      (orch.on ? ORCH_NOTE + ORCH_NOTE_CLAUDE : "");
     const args = [
       "-p", text,
       this.started ? "--resume" : "--session-id", this.id,
@@ -245,6 +248,7 @@ export class ClaudeSession {
     // O modo vale por turno: Shift+Tab no REPL muda o próximo turno.
     const mode = { manual: "default", auto: "acceptEdits", plan: "plan", bypass: "bypassPermissions" }[perms.mode];
     args.push("--permission-mode", mode);
+    if (orch.on) args.push("--disallowedTools", ...CLAUDE_EDIT_TOOLS);
     if (perms.mode !== "bypass") {
       args.push("--allowedTools", ...readOnlyMcp.map((n) => MCP_PREFIX + n), "--permission-prompt-tool", `${MCP_PREFIX}${APPROVE_TOOL}`);
     }
@@ -265,7 +269,8 @@ export class ClaudeSession {
       const child = (this.child = spawn(cmd.command, cmd.args, {
         cwd: this.o.root, stdio: ["ignore", "pipe", "pipe"],
         // `/reasoning none`: o claude desliga o raciocínio com MAX_THINKING_TOKENS=0 (não há `--effort none`)
-        env: { ...process.env, ...this.o.env, BRITO_DEPTH: String(Number(process.env.BRITO_DEPTH ?? 0) + 1), ...(wireEffort(this.effort).thinking ? {} : { MAX_THINKING_TOKENS: "0" }) },
+        env: { ...process.env, ...this.o.env, BRITO_DEPTH: String(Number(process.env.BRITO_DEPTH ?? 0) + 1),
+          ...(orch.on && !process.env.MCP_TOOL_TIMEOUT ? { MCP_TOOL_TIMEOUT: ORCH_MCP_TIMEOUT } : {}), ...(wireEffort(this.effort).thinking ? {} : { MAX_THINKING_TOKENS: "0" }) },
       }));
       let buf = "", stderr = "", ok = true, interrupted = false;
       const failure: ClaudeCliFailure = { stderr: "", code: null };

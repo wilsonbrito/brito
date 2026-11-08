@@ -11,6 +11,8 @@ import "../tools/bash.js";
 import "../tools/graph.js";
 import "../tools/delegate.js";
 import "../tools/plan.js";
+import "../tools/implement.js";
+import "../tools/spec.js";
 import "../tools/skills.js";
 import "../tools/digest.js";
 import "../tools/todo.js";
@@ -29,12 +31,13 @@ import { engineChip, activateFallback, chooseModel, cliShouldFallBack, fallbackW
 import { contextWindowFor, resolveModel } from "../provider/resolve.js";
 import type { Msg } from "../provider/types.js";
 import { PLAN_NOTE, perms, type PermMode } from "../permissions.js";
+import { ORCH_NOTE, implStatus, mainTools, orch, orchGuard, restoreOrch } from "../orchestrator.js";
 import { getSkill, listBuiltins, listSkills, skillsIndex } from "../skills/store.js";
 import type { ToolContext } from "../tools/registry.js";
 
 /**
  * Backend do app desktop, controlado por JSON em linhas.
- * stdin  → {t:"send",text} {t:"abort"} {t:"approve",id,allow,scope?:"session"} {t:"config",model?,effort?,mode?} {t:"reset"} {t:"quit"}
+ * stdin  → {t:"send",text} {t:"abort"} {t:"approve",id,allow,scope?:"session"|"project"} {t:"config",model?,effort?,mode?,orch?} {t:"reset"} {t:"query"} {t:"action"} {t:"quit"}
  * stdout → linhas "@@{json}" (qualquer outra linha, como logs perdidos, a janela ignora).
  * Motor: perfil de endpoint (ex.: Qwen) ou ANTHROPIC_API_KEY usam o loop próprio (como o `brito` no terminal); sem
  * nada disso, o `claude` CLI (assinatura). Se o Claude cai por conta/capacidade (ou nem há conta), segue no qwen.
@@ -182,10 +185,10 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
     const ctx: ToolContext = { root, graph, ask, sync, dirty: false, loadedSkills: o.loadedSkills ?? new Set(), model: () => agent.model };
     const fallback = o.fallback ?? newFallbackState(model);
     const system = memoSystem(
-      () => systemKey(root, perms.mode === "plan", syms + notes === 0),
-      () => buildSystemPrompt(root, graphStatsLine(syms, notes, "now"), skillsIndex(root)) + (perms.mode === "plan" ? PLAN_NOTE : ""),
+      () => systemKey(root, perms.mode === "plan", syms + notes === 0) + `|${orch.on}`,
+      () => buildSystemPrompt(root, graphStatsLine(syms, notes, "now"), skillsIndex(root)) + (perms.mode === "plan" ? PLAN_NOTE : "") + (orch.on ? ORCH_NOTE : ""),
     );
-    const agent = new Agent(system, ctx, { model, sink, fallback });
+    const agent = new Agent(system, ctx, { model, sink, fallback, tools: mainTools });
     if (o.messages) agent.messages = o.messages;
     if (o.effort) agent.effort = o.effort as Effort;
     if (o.session?.messages) agent.messages = repairHistory(o.session.messages);
@@ -224,6 +227,7 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
       async send(text) {
         ac = new AbortController();
         sink.turnStart();
+        orchGuard(agent.model, sink.warn); // troca para o qwen (fallback ou modelo escolhido): não há mais a quem delegar
         let ok = true;
         try { await agent.send(text, ac.signal); } catch (e: any) { ok = false; ac.signal.aborted ? sink.warn("⏹ interrompido") : sink.error(e?.message ?? String(e)); } finally { sink.turnEnd(ok); ac = null; persist(); }
       },
@@ -314,8 +318,9 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
   }
 
   let busy = false;
+  restoreOrch(engine.model, (m) => emit({ t: "warn", msg: m }), (m) => emit({ t: "info", msg: m }));
   const panels = new Panels(root, graphRootFor(root), isHome);
-  const ready =() => emit({ t: "ready", engine: engine.kind, sessionId: engine.sessionId, model: engine.model, effort: engine.effort, mode: perms.mode, symbols: syms, notes, root, fallback: engine.fallback.active, chip: chipOf(engine.model, engine.fallback) });
+  const ready =() => emit({ t: "ready", engine: engine.kind, sessionId: engine.sessionId, model: engine.model, effort: engine.effort, mode: perms.mode, orch: orch.on, symbols: syms, notes, root, fallback: engine.fallback.active, chip: chipOf(engine.model, engine.fallback) });
   ready();
 
   const rl = readline.createInterface({ input: process.stdin });
@@ -393,6 +398,13 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
         if (typeof m.model === "string") engine.setModel(m.model ? MODEL_ALIASES[m.model] ?? m.model : ""); // vazio = modelo/perfil salvo
         if (m.effort !== undefined) engine.effort = isEffort(m.effort) ? m.effort : "";
         if (["manual", "auto", "plan", "bypass"].includes(m.mode)) perms.mode = m.mode as PermMode;
+        // "on" liga o modo orquestrador (se o implementador estiver pronto); "" desliga.
+        if (m.orch === "") orch.on = false;
+        else if (m.orch === "on") {
+          const s = implStatus(engine.model, orch.model, process.env);
+          if (s.ready) orch.on = true;
+          else sink.warn(`modo orquestrador não ligou: ${s.reason}`);
+        }
         ready();
         break;
       }

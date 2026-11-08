@@ -2,9 +2,10 @@
 
 ## 0.9.0 — 2026-11-08
 
-The desktop app gets a real interface: streaming, diffs, panels and the same resources as the terminal.
+The desktop app gets a real interface (streaming, diffs, panels, the same resources as the terminal), and a new orchestrator mode: one model plans, another implements.
 
 ### Added
+- Orchestrator mode (`/orquestrar on|off|modelo <profile>`): Claude plans (writing `spec/<feature>/spec.md` and `tasks.md` through the new `spec_save` tool and waiting for approval before delegating) and reviews, an endpoint profile (Qwen by default) implements each task through the new `implement` tool. The tool appends `git status`, `git diff --stat` and the output of the task's `verify` command. Works in API mode, in `claude` CLI mode (via the MCP server, with approvals in the terminal) and in the desktop app ("Implementa" picker). `BRITO_IMPL_MODEL` or `implModel` in the config pick the profile; `/orquestrar on --global` keeps the mode on across restarts (`orchestrator: true`).
 - Streaming text with incremental rendering (no more flicker or lost selection), tool cards with diffs for `edit_file`/`write_file`, full tool output (up to 20000 chars), a subagent card and a pinned task list.
 - Permission prompts show a colored diff and offer "allow for this session" and "always in this project" (remembered per folder in `~/.brito/desktop-allow.json`; plan/skill approvals always ask).
 - Composer: `/` menu with commands and skills (manual skills run like in the terminal), `@` file autocomplete, drag files in, history with ↑/↓, Esc to interrupt, `/clear`, `/help`.
