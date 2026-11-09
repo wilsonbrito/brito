@@ -36,7 +36,11 @@ function copyApp(appDir) {
   fs.cpSync(path.join(here, "renderer"), path.join(appDir, "renderer"), { recursive: true });
   // Mermaid (diagramas no preview): vem do node_modules do desktop; sem ele os blocos ficam como código.
   const mermaid = path.join(here, "node_modules", "mermaid", "dist", "mermaid.min.js");
-  if (fs.existsSync(mermaid)) { fs.mkdirSync(path.join(appDir, "renderer", "vendor"), { recursive: true }); fs.copyFileSync(mermaid, path.join(appDir, "renderer", "vendor", "mermaid.min.js")); }
+  const VENDOR = { "mermaid.min.js": mermaid, "pdf.min.js": ["pdfjs-dist", "build", "pdf.min.js"], "pdf.worker.min.js": ["pdfjs-dist", "build", "pdf.worker.min.js"], "docx-preview.min.js": ["docx-preview", "dist", "docx-preview.min.js"], "jszip.min.js": ["jszip", "dist", "jszip.min.js"] };
+  for (const [name, src] of Object.entries(VENDOR)) {
+    const from = typeof src === "string" ? src : path.join(here, "node_modules", ...src);
+    if (fs.existsSync(from)) { fs.mkdirSync(path.join(appDir, "renderer", "vendor"), { recursive: true }); fs.copyFileSync(from, path.join(appDir, "renderer", "vendor", name)); }
+  }
   fs.copyFileSync(bundle, path.join(appDir, "dist", "cli.bundle.mjs"));
   fs.copyFileSync(iconPng, path.join(appDir, "icon.png")); // ícone da janela no Windows/Linux
   // o bundle lê ../package.json (versão) relativo a dist/: este arquivo cumpre os dois papéis

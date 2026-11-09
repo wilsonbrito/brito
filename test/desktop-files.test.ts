@@ -55,3 +55,17 @@ test("não sai da raiz: .., caminho absoluto de fora e link simbólico", () => {
     assert.equal(resolveInside(p.dir, "docs").target.endsWith("docs"), true);
   } finally { p.cleanup(); }
 });
+
+test("readPreview: PDF, Word e PowerPoint voltam como documento em base64; .doc antigo segue binário", () => {
+  const p = proj();
+  try {
+    for (const n of ["a.pdf", "b.docx", "c.pptx"]) fs.writeFileSync(path.join(p.dir, n), Buffer.from([0x50, 0x4b, 0, 1, 2]));
+    fs.writeFileSync(path.join(p.dir, "old.doc"), Buffer.from([0xd0, 0xcf, 0, 1]));
+    for (const n of ["a.pdf", "b.docx", "c.pptx"]) {
+      const r = readPreview(p.dir, n);
+      assert.equal(r.kind, "document");
+      assert.deepEqual([...Buffer.from(r.b64, "base64")], [0x50, 0x4b, 0, 1, 2]);
+    }
+    assert.equal(readPreview(p.dir, "old.doc").kind, "binary");
+  } finally { p.cleanup(); }
+});

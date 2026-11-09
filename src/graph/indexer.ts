@@ -217,7 +217,8 @@ async function scan(root: string, aliases: Aliases) {
   const files = await sourceFiles(root);
   const out = new Map<string, { src: string; hash: string }>();
   for (const rel of files) {
-    const src = fs.readFileSync(path.join(root, rel), "utf8");
+    let src: string;
+    try { src = fs.readFileSync(path.join(root, rel), "utf8"); } catch { continue; } // ilegível (OneDrive, travado, permissão): ignora
     if (src.length > 1_000_000) continue;
     out.set(rel, { src, hash: crypto.createHash("sha1").update(src).digest("hex") + ":" + INDEXER_VERSION + ":" + aliases.forFile(rel).signature });
   }

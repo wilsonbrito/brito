@@ -5,6 +5,8 @@ import path from "node:path";
 
 export const MAX_TEXT = 2 * 1024 * 1024; // acima disso o preview não abre (travaria a janela)
 export const MAX_IMAGE = 5 * 1024 * 1024;
+export const MAX_DOC = 40 * 1024 * 1024; // PDF/Word/PowerPoint: lidos em binário e renderizados na janela
+const DOCS = new Set(["pdf", "docx", "pptx"]);
 const IMAGES = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", bmp: "image/bmp", ico: "image/x-icon" };
 const ALWAYS_HIDDEN = new Set([".git", "node_modules", ".DS_Store", "Thumbs.db"]);
 
@@ -61,6 +63,10 @@ export function readPreview(root, rel) {
   if (IMAGES[ext]) {
     if (st.size > MAX_IMAGE) return { ...base, kind: "toolarge" };
     return { ...base, kind: "image", dataUrl: `data:${IMAGES[ext]};base64,${fs.readFileSync(target).toString("base64")}` };
+  }
+  if (DOCS.has(ext)) {
+    if (st.size > MAX_DOC) return { ...base, kind: "toolarge" };
+    return { ...base, kind: "document", b64: fs.readFileSync(target).toString("base64") };
   }
   if (st.size > MAX_TEXT) return { ...base, kind: "toolarge" };
   const buf = fs.readFileSync(target);

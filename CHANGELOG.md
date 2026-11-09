@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.1 — 2026-11-09
+
+The desktop file preview now opens PDF, Word and PowerPoint.
+
+### Added
+- **PDF in the preview:** pages are rendered (lazily, so big files stay fast), with page count and zoom.
+- **Word (.docx) in the preview:** shown as the document itself — pages, margins, fonts, tables, headers and footers — with zoom. Links do not navigate.
+- **PowerPoint (.pptx) in the preview:** one card per slide with title, text, images and speaker notes.
+- Old `.doc`, `.ppt` and spreadsheets show a clear message instead of "binary file". Limit: 40 MB.
+
+### Fixed
+- The code graph indexer no longer aborts when a file cannot be read (locked, permission, cloud-synced folders); it skips it.
+
+### Notes
+- The PDF, Word and PowerPoint libraries ship inside the desktop app. The npm package (`brito-cli`) only gets the indexer fix.
+
 ## 0.10.0 — 2026-11-09
 
 Read your project inside the Brito desktop app (Markdown, code, images and diagrams), bring your Claude Code setup with one command, and finally measure how good the automatic skills are, model by model.

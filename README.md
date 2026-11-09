@@ -12,7 +12,7 @@ Brito is an agent for software development. Use it in the terminal (`brito-cli` 
 
 ## What's new in 0.10
 
-- **Read your project inside the desktop app.** Open the **Files** panel → **Project** tab: folder tree plus a reader for Markdown (front matter, task lists, tables, Obsidian callouts, `[[wikilinks]]`), syntax-highlighted code and images. ` ```mermaid ` blocks render as diagrams. Paths the agent mentions in the chat (`src/cli.ts:120`) are clickable. It is read-only, and it only reads inside the project folders you added.
+- **Read your project inside the desktop app.** Open the **Files** panel → **Project** tab: folder tree plus a reader for Markdown (front matter, task lists, tables, Obsidian callouts, `[[wikilinks]]`), syntax-highlighted code, images, **PDF, Word (.docx) and PowerPoint (.pptx)**. ` ```mermaid ` blocks render as diagrams. Paths the agent mentions in the chat (`src/cli.ts:120`) are clickable. It is read-only, and it only reads inside the project folders you added.
 - **Bring your Claude Code setup.** Run `brito importar claude-code` to see what would come over (skills, subagents, `deny` rules). Nothing is written until you add `--aplicar`. Imported skills start "in trial" and go through the safety lint; `--desfazer` undoes it. Add `--incluir-allow` for `allow` rules and `--memoria` for the project memory. Credentials are never read.
 - **Know which model writes good skills.** Every automatic skill now records its author. `/skills stats` shows, per model (local SLM vs. Claude), created / promoted / archived skills and the promotion rate, so you can decide whether a cheaper model is good enough.
 
