@@ -1,5 +1,5 @@
 // Painéis Skills / Agentes / Grafo / Memória. Usa query/action/ensureBackend do app.js (mesmo escopo global).
-const PANELS = { skills: "Skills", agents: "Agentes", graph: "Grafo de código", memory: "Memória", files: "Arquivos alterados" };
+const PANELS = { skills: "Skills", agents: "Agentes", graph: "Grafo de código", memory: "Memória", files: "Arquivos alterados", settings: "Configurações" };
 let panelId = null, panelTimer;
 const txt = (tag, cls, s) => { const e = el(tag, cls); e.textContent = s ?? ""; return e; };
 const btn = (label, fn) => { const b = txt("button", "btn2", label); b.onclick = fn; return b; };
@@ -11,15 +11,16 @@ async function openPanel(id) {
   $("panel").hidden = false;
   $("panel-tabs").textContent = PANELS[id];
   $("panel-q").value = "";
-  $("panel-q").style.display = id === "agents" || id === "files" ? "none" : "";
+  $("panel-q").style.display = id === "agents" || id === "files" || id === "settings" ? "none" : "";
   $("panel-q").placeholder = id === "skills" ? "Filtrar skills…" : id === "graph" ? "Buscar símbolo…" : "Buscar notas…";
   document.querySelectorAll("#panel-btns button").forEach((b) => b.classList.toggle("on", b.dataset.panel === id));
   $("panel-body").replaceChildren(txt("div", "pmsg", "Carregando…"));
+  document.getElementById("settings-btn").classList.toggle("on", id === "settings");
   if (id === "files") return refreshPanel(); // só olha a conversa: não precisa do backend
   if (!(await ensureBackend(s))) return $("panel-body").replaceChildren(txt("div", "pmsg", "Backend indisponível."));
   refreshPanel();
 }
-function closePanel() { $("panel").hidden = true; panelId = null; document.querySelectorAll("#panel-btns button").forEach((b) => b.classList.remove("on")); }
+function closePanel() { $("panel").hidden = true; panelId = null; document.querySelectorAll("#panel-btns button").forEach((b) => b.classList.remove("on")); $("settings-btn").classList.remove("on"); }
 
 async function refreshPanel() {
   const s = active(), id = panelId, q = $("panel-q").value.trim();
@@ -30,6 +31,7 @@ async function refreshPanel() {
     if (id === "skills") nodes = await skillsView(s, q);
     else if (id === "agents") nodes = await agentsView(s);
     else if (id === "files") nodes = filesView(s);
+    else if (id === "settings") nodes = await settingsView(s);
     else if (id === "graph") nodes = await graphView(s, q);
     else nodes = await memoryView(s, q);
   } catch (e) { nodes = [txt("div", "pmsg", `Erro: ${e?.message ?? e}`)]; }
@@ -97,6 +99,47 @@ function filesView(s) {
   });
 }
 
+/** "2h 05min" / "3d 4h" até o ISO dado. */
+function resetIn(iso) {
+  const t = Date.parse(iso ?? "");
+  if (!Number.isFinite(t)) return "";
+  const min = Math.max(0, Math.round((t - Date.now()) / 60000));
+  if (min < 60) return `${min}min`;
+  if (min < 48 * 60) return `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, "0")}min`;
+  return `${Math.floor(min / 1440)}d ${Math.floor((min % 1440) / 60)}h`;
+}
+const fmtTok = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n ?? 0));
+function meterCard(title, percent, detail) {
+  const c = el("div", "card2"), h = el("div", "h");
+  h.append(txt("b", "", title), txt("span", "tag", `${Math.round(percent)}%`));
+  const bar = el("div", "meter"), fill = el("i", percent >= 90 ? "hot" : percent >= 70 ? "warn" : "");
+  fill.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+  bar.append(fill);
+  c.append(h, bar);
+  if (detail) c.append(txt("div", "sub2", detail));
+  return c;
+}
+
+async function settingsView(s) {
+  const d = await query(s.id, "usage", "force", 12000);
+  if (!d || !d.plan) return [txt("div", "pmsg", "Sem resposta do backend (atualize o app e a CLI para a mesma versão).")];
+  const out = [txt("div", "sec2", `CONSUMO DO PLANO${d.plan.ok && d.plan.data.plan ? " · " + d.plan.data.plan.toUpperCase() : ""}`)];
+  if (!d.plan.ok) out.push(txt("div", "pmsg", d.plan.reason));
+  else {
+    for (const b of d.plan.data.buckets) out.push(meterCard(b.label, b.percent, b.resetsAt ? `reseta em ${resetIn(b.resetsAt)}` : ""));
+    const x = d.plan.data.extra;
+    if (x) out.push(meterCard("Uso extra (mês)", x.percent, `${x.used.toFixed(2)} de ${x.limit.toFixed(2)} ${x.currency}`));
+    if (!d.plan.data.buckets.length && !x) out.push(txt("div", "pmsg", "A Anthropic não devolveu limites para esta conta."));
+  }
+  const u = d.session?.usage ?? {};
+  out.push(txt("div", "sec2", "ESTA SESSÃO"));
+  const c = el("div", "card2");
+  c.append(txt("div", "", `↑${fmtTok(u.input)}  ↓${fmtTok(u.output)}  · cache ${fmtTok(u.cacheRead)}${d.session?.costUsd ? `  · US$ ${d.session.costUsd.toFixed(2)}` : ""}`),
+    txt("div", "sub2", `${d.model ?? ""} · contexto ${fmtTok(d.session?.contextTokens)}${d.session?.contextWindow ? " / " + fmtTok(d.session.contextWindow) : ""}`));
+  out.push(c, btn("Atualizar", refreshPanel));
+  return out;
+}
+
 async function agentsView(s) {
   const list = await query(s.id, "agents", "");
   return (list ?? []).map((a) => {
@@ -146,6 +189,7 @@ async function memoryView(s, q) {
 }
 
 document.querySelectorAll("#panel-btns button").forEach((b) => (b.onclick = () => (panelId === b.dataset.panel ? closePanel() : openPanel(b.dataset.panel))));
+$("settings-btn").onclick = () => (panelId === "settings" ? closePanel() : openPanel("settings"));
 $("panel-x").onclick = closePanel;
 $("panel-q").addEventListener("input", () => { clearTimeout(panelTimer); panelTimer = setTimeout(refreshPanel, 250); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && panelId) closePanel(); });

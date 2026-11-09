@@ -1,3 +1,4 @@
+import { fetchPlanUsage } from "../usage/plan.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -370,7 +371,8 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
           else if (m.q === "commands") {
             const skills: CommandInfo[] = [...listBuiltins(root), ...listSkills(root).filter((s) => s.invoke === "manual")].map((s) => ({ name: s.name, description: s.description, kind: "skill" as const }));
             data = [...BUILTIN_COMMANDS, ...skills].filter((c) => !arg || c.name.includes(arg));
-          } else if (m.q === "models") data = { aliases: Object.keys(MODEL_ALIASES), profiles: Object.keys(loadProfiles().profiles) };
+          } else if (m.q === "usage") data = { plan: await fetchPlanUsage({ force: arg === "force" }), session: engine.stats(), model: engine.model };
+          else if (m.q === "models") data = { aliases: Object.keys(MODEL_ALIASES), profiles: Object.keys(loadProfiles().profiles) };
         } catch (e: any) { sink.warn(`consulta ${m.q} falhou: ${e?.message ?? e}`); }
         emit({ t: "result", id: m.id, data });
         break;

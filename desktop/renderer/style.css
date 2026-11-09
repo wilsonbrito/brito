@@ -174,3 +174,9 @@ select:hover { background: var(--bg); color: var(--fg); }
 #pal-list .opt.on { background: var(--bg); }
 #pal-list .opt .d { color: var(--mute); margin-left: auto; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
 #theme-btn { margin-top: auto; text-align: left; color: var(--mute); padding: 8px; }
+#settings-btn { text-align: left; color: var(--mute); padding: 8px; }
+#settings-btn.on, #settings-btn:hover { color: var(--fg, inherit); }
+.meter { height: 8px; border-radius: 4px; background: var(--code); overflow: hidden; margin: 8px 0 2px; }
+.meter > i { display: block; height: 100%; background: var(--accent, #6b8afd); }
+.meter > i.warn { background: var(--warn); }
+.meter > i.hot { background: #e5484d; }

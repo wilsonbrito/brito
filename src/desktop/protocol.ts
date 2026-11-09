@@ -11,7 +11,7 @@ export type ClientMsg =
   | { t: "approve"; id: string; allow: boolean; scope?: "session" | "project" }
   | { t: "config"; model?: string; effort?: string; mode?: "manual" | "auto" | "plan" | "bypass" }
   | { t: "reset" }
-  | { t: "query"; id: string; q: "files" | "commands" | "models" | "skills" | "skill" | "agents" | "symbols" | "symbol" | "notes"; arg?: string }
+  | { t: "query"; id: string; q: "files" | "commands" | "models" | "skills" | "skill" | "agents" | "symbols" | "symbol" | "notes" | "usage"; arg?: string }
   /** ações dos painéis; a resposta é um `result` com { ok, msg } */
   | { t: "action"; id: string; op: "skill.approve" | "skill.reject" | "skill.delete" | "skill.promote" | "graph.reindex" | "note.delete"; arg?: string }
   | { t: "quit" };

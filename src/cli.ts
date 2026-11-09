@@ -36,6 +36,7 @@ import { defaultComplete, recordOutcomes, reflect, shouldReflect, type Complete 
 import { expireTrials, skillsMode } from "./skills/trial.js";
 import { claudeCliComplete } from "./skills/learn-cli.js";
 import { pullModel, removeModel, slmStatus, withSlm } from "./local/slm.js";
+import { usageCommand } from "./usage/command.js";
 import type { TurnRecord } from "./agent/loop.js";
 import type { Msg } from "./provider/types.js";
 import { buildSystemPrompt, graphStatsLine, memoSystem, systemKey } from "./agent/prompt.js";
@@ -603,6 +604,7 @@ async function buildApiBackend(root: string, model: string, io: { ask: (q: strin
           ui.print(`  ${c.soft(`${fmtTokens(agent.contextTokens)} / ${fmtTokens(win)}`)} ${c.muted(`(${pct}%) · ${agent.messages.length} mensagens · compacta em ~${fmtTokens(compactAtFor(agent.model))}`)}`);
         },
       },
+      "/usage": usageCommand(() => ({ ...agent.usage, costUsd: backend.cost?.() })),
       "/index": { desc: "reconstrói o grafo do zero", run: async () => { ui.info("reconstruindo grafo…"); ui.print(c.muted(JSON.stringify(await indexProject(root, graph, { full: true })))); } },
       "/learn": { desc: "extrai skills do último turno agora", run: async () => { await learn(true); } },
       "/skills": skillsCommand(root, io, { complete: withSlm(defaultComplete), model: learnModel }),
@@ -757,6 +759,7 @@ async function buildClaudeBackend(root: string, io: Io, sw: () => SwitchableBack
         },
       },
       "/context": unavailable,
+      "/usage": usageCommand(() => ({ ...session.usage, costUsd: session.costUsd })),
       "/learn": { desc: "extrai skills do último turno agora", run: async () => { await learn(true); } },
       "/skills": skillsCommand(root, io, { complete: withSlm(claudeCliComplete), model: () => process.env.BRITO_LEARN_MODEL ?? "" }),
       "/permissions": permissionsCommand(root),
