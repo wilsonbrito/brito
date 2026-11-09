@@ -10,6 +10,14 @@ O Brito é um agente para desenvolvimento de software. Use no terminal (`brito-c
 
 *Uma sessão real num pequeno projeto SvelteKit: uma pergunta, duas consultas ao grafo (0,1 s e 0,0 s) e uma resposta que já inclui os componentes `.svelte` que dependem do arquivo. A barra de status mostra o custo real do turno.*
 
+## Novidades da 0.10
+
+- **Leia o seu projeto dentro do app de desktop.** Abra o painel **Arquivos** → aba **Projeto**: árvore de pastas e um leitor de Markdown (frontmatter, tarefas, tabelas, callouts e `[[wikilinks]]` do Obsidian), código com realce e imagens. Blocos ` ```mermaid ` viram diagramas. Os caminhos que o agente cita no chat (`src/cli.ts:120`) são clicáveis. É só leitura, e só lê dentro das pastas que você adicionou como projeto.
+- **Traga a sua configuração do Claude Code.** Rode `brito importar claude-code` para ver o que viria (skills, subagentes, regras `deny`). Nada é gravado até você adicionar `--aplicar`. As skills importadas começam "em teste" e passam pelo lint de segurança; `--desfazer` reverte. Use `--incluir-allow` para as regras `allow` e `--memoria` para a memória do projeto. Credenciais nunca são lidas.
+- **Descubra qual modelo escreve boas skills.** Toda skill automática agora registra o autor. `/skills stats` mostra, por modelo (SLM local × Claude), skills criadas, promovidas e arquivadas e a taxa de promoção, para você decidir se um modelo mais barato basta.
+
+Atualizando da 0.9: `npm i -g brito-cli@latest` e atualize o app de desktop para a mesma versão (o app avisa quando ele e a CLI estão fora de sincronia). Detalhes no [CHANGELOG](CHANGELOG.md).
+
 ## Destaques
 
 > **Atualizando para a 0.6:** o motor do grafo mudou do Kùzu (descontinuado) para o LadybugDB. O grafo é reconstruído sozinho no primeiro uso; o seu `.brito/graph.kuzu` antigo é mantido. O Brito pergunta uma vez se copia as suas notas (memória) para o grafo novo, ou rode `brito migrar-notas` quando quiser. Os testes rodam no CI em macOS, Linux e Windows (use a 0.6.1 ou posterior no Windows/Linux). Veja o [CHANGELOG](CHANGELOG.md).
@@ -22,6 +30,9 @@ O Brito é um agente para desenvolvimento de software. Use no terminal (`brito-c
 - **Dois backends, uma interface.** Use uma chave da API da Anthropic ou a sua assinatura do Claude Code pela CLI `claude`. O Brito nunca lê nem envia o token da sua assinatura.
 - **Terminal ou app de desktop.** `npm i -g brito-cli` instala o comando `brito`; o app de desktop é um executável nativo com janela (projetos e sessões numa barra lateral, chat, pedidos de permissão), sem precisar de Node nem de terminal. Veja [Instalação](#instalação).
 - **Imagens.** Arraste um arquivo de imagem para o prompt (ou cole o caminho) e ele é anexado ao turno: PNG, JPEG, GIF ou WebP, até 5 MB.
+- **Preview de arquivos no desktop (somente leitura).** O painel Arquivos tem a aba "Projeto": árvore do repositório e leitor de Markdown (frontmatter, listas aninhadas, tarefas, tabelas, callouts e `[[wikilinks]]` do Obsidian), código com realce e imagens. Blocos Mermaid viram diagrama; caminhos citados no chat (`src/cli.ts:120`) abrem o preview.
+- **Importar do Claude Code.** `brito importar claude-code` mostra o que traria (skills em teste, subagentes, regras `deny`; `--incluir-allow` e `--memoria` são opcionais) e só grava com `--aplicar`. `--desfazer` reverte. Credenciais nunca são lidas.
+- **Medição da reflexão.** Cada skill automática registra o modelo que a gerou; `/skills stats` mostra a taxa de promoção por modelo (SLM local × Claude).
 - **Subagentes.** `explore`, `plan` e `general` rodam em contextos isolados (os somente-leitura, em paralelo); crie os seus em `.brito/agents/*.md`.
 - **Servidor MCP.** `brito mcp-serve` expõe grafo, memória e skills a outros clientes MCP, como o Claude Code. As tools de consulta são marcadas `alwaysLoad`, para não ficarem escondidas atrás da busca de tools.
 

@@ -38,6 +38,8 @@ export interface Skill {
   model: string;
   /** o que deu errado no último turno com tropeço (alimenta a reflexão e o skill_load) */
   lastLoss: string;
+  /** quem gerou a skill na reflexão autônoma (`slm` ou id do modelo); vazio = escrita por humano/antes do registro */
+  by: string;
   /** skill embutida no Brito (somente leitura; um arquivo em disco com o mesmo nome a sobrepõe) */
   builtin?: boolean;
 }
@@ -74,6 +76,7 @@ function parse(text: string, scope: Scope): Skill | null {
     invoke: meta.invoke === "manual" ? "manual" : "auto",
     model: meta.model ?? "",
     lastLoss: meta.lastLoss ?? "",
+    by: meta.by ?? "",
   };
 }
 
@@ -82,7 +85,7 @@ export function writeSkill(root: string, s: Skill) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(
     file,
-    stringifyFrontmatter({ name: s.name, description: s.description, version: s.version, uses: s.uses, created: s.created, updated: s.updated, lastUsed: s.lastUsed, refs: s.refs.join(", "), status: s.status, origin: s.origin, wins: s.wins, losses: s.losses, ...(s.invoke === "manual" ? { invoke: "manual" } : {}), ...(s.model ? { model: s.model } : {}), ...(s.lastLoss ? { lastLoss: s.lastLoss } : {}) }, s.body),
+    stringifyFrontmatter({ name: s.name, description: s.description, version: s.version, uses: s.uses, created: s.created, updated: s.updated, lastUsed: s.lastUsed, refs: s.refs.join(", "), status: s.status, origin: s.origin, wins: s.wins, losses: s.losses, ...(s.invoke === "manual" ? { invoke: "manual" } : {}), ...(s.model ? { model: s.model } : {}), ...(s.lastLoss ? { lastLoss: s.lastLoss } : {}), ...(s.by ? { by: s.by } : {}) }, s.body),
   );
 }
 
@@ -102,7 +105,7 @@ export function getBuiltin(name: string): Skill | null {
   const b = BUILTIN_SKILLS.find((x) => x.name === name);
   if (!b) return null;
   const d = "2026-11-07";
-  return { name: b.name, description: b.description, version: 1, uses: 0, created: d, updated: d, lastUsed: d, refs: [], status: "active", origin: "manual", wins: 0, losses: 0, body: b.body, scope: "global", invoke: "manual", model: b.model ?? "", lastLoss: "", builtin: true };
+  return { name: b.name, description: b.description, version: 1, uses: 0, created: d, updated: d, lastUsed: d, refs: [], status: "active", origin: "manual", wins: 0, losses: 0, body: b.body, scope: "global", invoke: "manual", model: b.model ?? "", lastLoss: "", by: "", builtin: true };
 }
 
 /** Embutidas ainda não sobrepostas por uma skill do usuário. */
@@ -116,6 +119,17 @@ function listScope(root: string, scope: Scope): Skill[] {
   return fs.readdirSync(dir, { withFileTypes: true })
     .filter((d) => d.isDirectory() && !d.name.startsWith("."))
     .flatMap((d) => { const s = getSkillIn(root, d.name, scope); return s ? [s] : []; });
+}
+
+/** Skills arquivadas (`.trash`), lidas só para estatística: o placar delas é a evidência de que o gerador errou. */
+export function listArchived(root: string): Skill[] {
+  return (["project", "global"] as Scope[]).flatMap((scope) => {
+    const dir = path.join(dirOf(root, scope), ".trash");
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((d) => {
+      try { const sk = parse(fs.readFileSync(path.join(dir, d.name, "SKILL.md"), "utf8"), scope); return sk ? [sk] : []; } catch { return []; }
+    });
+  });
 }
 
 const DAY = 86_400_000;
@@ -216,7 +230,7 @@ export function targetScope(root: string, name: string, scope?: Scope): Scope {
  * `opts.auto` = gravação sem revisão humana (reflexão autônoma): skill nova nasce em teste; atualizar mantém a origem, e
  * uma skill em teste zera o placar (conteúdo novo = hipótese nova). Sem `auto`, um humano aprovou: vira ativa e manual.
  */
-export function saveSkill(root: string, input: SkillInput, scope?: Scope, opts: { auto?: boolean } = {}): { created: boolean; version: number; scope: Scope } {
+export function saveSkill(root: string, input: SkillInput, scope?: Scope, opts: { auto?: boolean; by?: string } = {}): { created: boolean; version: number; scope: Scope } {
   validate(input);
   const target = targetScope(root, input.name, scope);
   const prev = getSkillIn(root, input.name, target);
@@ -243,6 +257,7 @@ export function saveSkill(root: string, input: SkillInput, scope?: Scope, opts: 
     invoke: input.invoke ?? prev?.invoke ?? "auto",
     model: input.model ?? prev?.model ?? "",
     lastLoss: prev?.lastLoss ?? "",
+    by: prev?.by || (opts.auto ? opts.by ?? "" : ""),
   };
   writeSkill(root, skill);
   return { created: !prev, version: skill.version, scope: target };

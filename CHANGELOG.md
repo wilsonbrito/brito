@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.10.0 — 2026-11-09
+
+Read your project inside the Brito desktop app (Markdown, code, images and diagrams), bring your Claude Code setup with one command, and finally measure how good the automatic skills are, model by model.
+
+### Added
+- **File preview in the desktop app (read-only).** The Files panel has a new "Project" tab: the folder tree (it respects `.gitignore`) on the left and a reader on the right.
+  - Markdown with front matter, nested lists, task lists, tables, Obsidian callouts (`> [!tip]`) and `[[wikilinks]]`, plus relative links and images between your files.
+  - Code with syntax highlighting and line numbers; images.
+  - ` ```mermaid ` blocks render as diagrams (PlantUML shows the code with a notice).
+  - File paths in the chat, like `src/cli.ts:120`, are now links that open the preview at that line.
+  - Reading is confined to the project folders you added: `..`, absolute paths outside the project and symlinks that escape it are refused.
+- **Import from Claude Code:** `brito importar claude-code`.
+  - It only shows what it would do; add `--aplicar` to write.
+  - Skills come in as "trial" (3 clean uses promote them) and go through the safety lint; the ones with destructive commands wait in `/skills pending`.
+  - Subagents (`.claude/agents` → `.brito/agents`) and `deny` permission rules come along. `allow` rules need `--incluir-allow`; the project memory needs `--memoria` (it becomes graph notes).
+  - Credentials are never read. `--desfazer` reverts the skills and agents it created. `CLAUDE.md` was already read natively, and `.mcp.json` is reported but not imported (Brito does not connect to external MCP servers yet).
+- **Measuring the automatic skills.** Each automatic skill now records which model wrote it (`by:` — `slm` for the local model, or the model id). `/skills stats` shows, per model, how many were created, promoted, still in trial or archived, and the promotion rate. Skills created before this version show as "(sem registro)".
+
+### Changed
+- The desktop app's content security policy now allows inline styles, because Mermaid's SVG needs them. Scripts stay restricted to the app's own files, and the Markdown renderer never emits raw HTML or inline styles.
+
+### Notes
+- The Mermaid library (~3.5 MB) now ships inside the desktop app.
+
 ## 0.9.0 — 2026-11-08
 
 The desktop app gets a real interface (streaming, diffs, panels, the same resources as the terminal), and a new orchestrator mode: one model plans, another implements.

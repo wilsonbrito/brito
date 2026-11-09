@@ -1,3 +1,4 @@
+import { setReflector } from "../skills/by.js";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -213,8 +214,9 @@ export const slmComplete: Complete = async ({ system, user, maxTokens }) => {
 export function withSlm(fallback: Complete): Complete {
   return async (req) => {
     if (!slmDisabled() && (await slmStatus()).ready) {
-      try { return await slmComplete(req); } catch { /* cai no modelo de sempre */ }
+      try { const r = await slmComplete(req); setReflector("slm"); return r; } catch { /* cai no modelo de sempre */ }
     }
+    setReflector(req.model || "remoto");
     return fallback(req);
   };
 }

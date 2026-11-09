@@ -13,6 +13,7 @@ import { activateFallback, newFallbackState } from "../src/provider/fallback.js"
 import type { ModelMessage, ModelProvider, ModelRequest, SendHooks } from "../src/provider/types.js";
 import type { TurnSink } from "../src/agent/sink.js";
 process.env.BRITO_SLM_FALLBACK = "off"; // hermético: o SLM baixado na máquina não entra na cadeia
+process.env.BRITO_SLM_COMPACT = "off"; // nem na compactação
 import { sandbox } from "./helpers.js";
 
 /** Provedor falso: devolve as respostas na ordem e grava cada requisição. */
@@ -88,7 +89,7 @@ test("imagem para modelo sem vision gera aviso", async () => {
 test("compactação usa o provedor sem raciocínio", async () => {
   const reqs = fakeProvider([text("resumo denso")]);
   const msgs = [{ role: "user" as const, content: "início" }, ...Array.from({ length: 10 }, (_, i) => ({ role: (i % 2 ? "user" : "assistant") as "user" | "assistant", content: `m${i}` }))];
-  const out = await summarizeMiddle("qwen", msgs);
+  const out = await summarizeMiddle("qwen", msgs, 6, async () => null);
   assert.equal(reqs[0].thinking, false);
   assert.equal(reqs[0].model, "qwen");
   assert.match(String(out[1].content), /^\[Resumo da conversa anterior\]/);

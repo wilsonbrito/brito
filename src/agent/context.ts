@@ -1,5 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { providerFor } from "../provider/index.js";
+import { resolveModel } from "../provider/resolve.js";
+import { slmCompactSummary } from "../local/compact.js";
 
 import type { Msg } from "../provider/types.js";
 
@@ -26,7 +28,7 @@ export function trimOldToolResults(msgs: Msg[], keep = 8): Msg[] {
 }
 
 /** Fase 2: resume o meio da conversa via LLM, mantendo o início e os últimos turnos. */
-export async function summarizeMiddle(model: string, msgs: Msg[], keepTail = 6): Promise<Msg[]> {
+export async function summarizeMiddle(model: string, msgs: Msg[], keepTail = 6, slmSummary: (text: string) => Promise<string | null> = slmCompactSummary): Promise<Msg[]> {
   if (msgs.length <= keepTail + 2) return msgs;
   let cut = msgs.length - keepTail;
   // O trecho final precisa começar numa mensagem de usuário "pura" (sem tool_result órfão).
@@ -35,14 +37,19 @@ export async function summarizeMiddle(model: string, msgs: Msg[], keepTail = 6):
   const head = msgs.slice(0, 1);
   const middle = msgs.slice(1, cut);
   const tail = msgs.slice(cut);
-  // Raciocínio desligado: num endpoint com raciocínio ele comeria o orçamento do resumo.
-  const res = await providerFor(model).send({
-    model,
-    maxTokens: 2000,
-    thinking: false,
-    system: "Resuma a conversa de um agente de programação. Preserve: objetivo, decisões, arquivos/símbolos tocados, erros encontrados, estado atual e próximos passos. Seja denso.",
-    messages: [{ role: "user", content: JSON.stringify(middle, (_k, v) => (v && typeof v === "object" && (v.type === "image" || v.type === "document") && v.source ? { type: v.type, note: "[anexo omitido]" } : v)).slice(0, 150_000) }],
-  });
-  const summary = res.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+  const body = JSON.stringify(middle, (_k, v) => (v && typeof v === "object" && (v.type === "image" || v.type === "document") && v.source ? { type: v.type, note: "[anexo omitido]" } : v)).slice(0, 150_000);
+  // O SLM local resume primeiro (não gasta token do Claude); se o modelo da sessão já é local, não há o que poupar.
+  let summary = resolveModel(model).local ? null : await slmSummary(body);
+  if (!summary) {
+    // Raciocínio desligado: num endpoint com raciocínio ele comeria o orçamento do resumo.
+    const res = await providerFor(model).send({
+      model,
+      maxTokens: 2000,
+      thinking: false,
+      system: "Resuma a conversa de um agente de programação. Preserve: objetivo, decisões, arquivos/símbolos tocados, erros encontrados, estado atual e próximos passos. Seja denso.",
+      messages: [{ role: "user", content: body }],
+    });
+    summary = res.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+  }
   return [...head, { role: "user", content: `[Resumo da conversa anterior]\n${summary}` }, { role: "assistant", content: "Entendido, continuando a partir do resumo." }, ...tail];
 }

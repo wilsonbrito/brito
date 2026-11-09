@@ -1,5 +1,5 @@
 // Painéis Skills / Agentes / Grafo / Memória. Usa query/action/ensureBackend do app.js (mesmo escopo global).
-const PANELS = { skills: "Skills", agents: "Agentes", graph: "Grafo de código", memory: "Memória", files: "Arquivos alterados", settings: "Configurações" };
+const PANELS = { skills: "Skills", agents: "Agentes", graph: "Grafo de código", memory: "Memória", files: "Arquivos", settings: "Configurações" };
 let panelId = null, panelTimer;
 const txt = (tag, cls, s) => { const e = el(tag, cls); e.textContent = s ?? ""; return e; };
 const btn = (label, fn) => { const b = txt("button", "btn2", label); b.onclick = fn; return b; };
@@ -10,6 +10,7 @@ async function openPanel(id) {
   panelId = id;
   $("panel").hidden = false;
   $("panel-tabs").textContent = PANELS[id];
+  if (id === "files") renderFileTabs();
   $("panel-q").value = "";
   $("panel-q").style.display = id === "agents" || id === "files" || id === "settings" ? "none" : "";
   $("panel-q").placeholder = id === "skills" ? "Filtrar skills…" : id === "graph" ? "Buscar símbolo…" : "Buscar notas…";
@@ -30,11 +31,12 @@ async function refreshPanel() {
   try {
     if (id === "skills") nodes = await skillsView(s, q);
     else if (id === "agents") nodes = await agentsView(s);
-    else if (id === "files") nodes = filesView(s);
+    else if (id === "files") nodes = pv.tab === "project" ? await projectView(s) : changedView(s);
     else if (id === "settings") nodes = await settingsView(s);
     else if (id === "graph") nodes = await graphView(s, q);
     else nodes = await memoryView(s, q);
   } catch (e) { nodes = [txt("div", "pmsg", `Erro: ${e?.message ?? e}`)]; }
+  body.classList.toggle("wide", id === "files" && pv.tab === "project");
   if (panelId === id) body.replaceChildren(...nodes);
 }
 
@@ -86,13 +88,14 @@ function changedFiles(s) {
   }
   return map;
 }
-function filesView(s) {
+function changedView(s) {
   const map = changedFiles(s);
   if (!map.size) return [txt("div", "pmsg", "Nenhum arquivo alterado nesta sessão ainda.")];
   return [...map].map(([file, edits]) => {
     const c = el("div", "card2"); const h = el("div", "h");
     const body = el("div");
     h.append(txt("b", "", file), txt("span", "tag", `${edits.length} ${edits.length === 1 ? "alteração" : "alterações"}`),
+      btn("Abrir", () => openFilePreview(file)),
       btn("Ver diffs", () => { if (body.firstChild) return body.replaceChildren(); for (const t of edits) body.append(isEdit(t.name) ? diffEl(t.input.old_string ?? "", t.input.new_string ?? "") : diffEl("", String(t.input.content ?? "").slice(0, 6000))); }));
     c.append(h, body);
     return c;

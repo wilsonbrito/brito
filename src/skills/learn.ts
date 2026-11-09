@@ -5,6 +5,7 @@ import { execTool, toApiTools, type ToolContext } from "../tools/registry.js";
 import type { TurnRecord } from "../agent/loop.js";
 import { perms } from "../permissions.js";
 import { getSkill, listPending, listSkills, savePending, staleRefs } from "./store.js";
+import { lastReflector } from "./by.js";
 import { saveAuto, skillsMode, recordOutcome } from "./trial.js";
 import { appendJournal, describeEntry, entryFromTurn, similarEntries } from "./journal.js";
 
@@ -192,10 +193,10 @@ export function buildReflectInput(turn: TurnRecord, ctx: ToolContext, previous?:
 const SaveArgs = z.object({ name: z.string(), description: z.string(), body: z.string(), refs: z.array(z.string()).default([]), reason: z.string().default(""), scope: z.enum(["project", "global"]).optional() });
 
 /** Modo autônomo: grava em teste (ou na fila de revisão, se for arriscado) sem perguntar ao usuário. */
-function stageAuto(input: unknown, ctx: ToolContext): { saved: boolean; msg: string } {
+function stageAuto(input: unknown, ctx: ToolContext, by = ""): { saved: boolean; msg: string } {
   const parsed = SaveArgs.safeParse(input);
   if (!parsed.success) return { saved: false, msg: "skill não salva: input inválido" };
-  try { return saveAuto(ctx.root, parsed.data); } catch (e: any) { return { saved: false, msg: `skill não salva: ${e?.message ?? e}` }; }
+  try { return saveAuto(ctx.root, parsed.data, Date.now(), by); } catch (e: any) { return { saved: false, msg: `skill não salva: ${e?.message ?? e}` }; }
 }
 
 function stage(input: unknown, ctx: ToolContext): string {
@@ -211,6 +212,7 @@ function stage(input: unknown, ctx: ToolContext): string {
 export async function reflect(turn: TurnRecord, ctx: ToolContext, model: string, complete: Complete = defaultComplete, previous?: TurnRecord | null): Promise<string[]> {
   const content = await complete({ model, maxTokens: 3000, system: SYSTEM, tools: toApiTools(new Set(["skill_save"])), user: buildReflectInput(turn, ctx, previous) });
 
+  const by = lastReflector() || model;
   const out: string[] = [];
   const saved: string[] = [];
   let saves = 0;
@@ -219,7 +221,7 @@ export async function reflect(turn: TurnRecord, ctx: ToolContext, model: string,
     saves++;
     const name = String((b.input as { name?: unknown })?.name ?? "");
     if (skillsMode() === "auto") {
-      const r = stageAuto(b.input, ctx);
+      const r = stageAuto(b.input, ctx, by);
       out.push(r.msg);
       if (r.saved) saved.push(name);
       continue;

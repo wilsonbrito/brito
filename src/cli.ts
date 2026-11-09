@@ -33,9 +33,10 @@ import type { ToolContext } from "./tools/registry.js";
 import { adviseSkill, approvePending, lintSkill, listBuiltins, listPending, listSkills, rejectPending, skillsIndex, staleRefs } from "./skills/store.js";
 import { applyProposal, autoConsolidate, describeProposal, proposeConsolidation, pruneCandidates, type Proposal } from "./skills/consolidate.js";
 import { defaultComplete, recordOutcomes, reflect, shouldReflect, type Complete } from "./skills/learn.js";
-import { expireTrials, skillsMode } from "./skills/trial.js";
+import { expireTrials, skillStats, skillsMode } from "./skills/trial.js";
 import { claudeCliComplete } from "./skills/learn-cli.js";
 import { pullModel, removeModel, slmStatus, withSlm } from "./local/slm.js";
+import { slmStatsLine } from "./local/stats.js";
 import { usageCommand } from "./usage/command.js";
 import type { TurnRecord } from "./agent/loop.js";
 import type { Msg } from "./provider/types.js";
@@ -89,6 +90,37 @@ program
   .action((o) => {
     const lines = sessionLines(rootOf(o));
     console.log(lines.length ? lines.join("\n") : c.muted("nenhuma sessão salva neste projeto"));
+  });
+
+program
+  .command("importar [origem]")
+  .alias("import")
+  .description("Importa skills, subagentes, regras de permissão e memória do Claude Code (origem: claude-code). Sem --aplicar só mostra o que faria")
+  .option("-d, --dir <dir>", "raiz do projeto")
+  .option("--aplicar", "grava de verdade (sem isto é só uma prévia)")
+  .option("--incluir-allow", "importa também as regras allow (liberam ações sem perguntar)")
+  .option("--memoria", "importa a memória do Claude Code deste projeto como notas do grafo")
+  .option("--desfazer", "desfaz um import anterior (skills e agentes; regras e notas ficam)")
+  .action(async (origem: string | undefined, o) => {
+    if (origem && origem !== "claude-code") { console.error(c.warn(`origem "${origem}" não suportada: por enquanto só claude-code`)); process.exitCode = 1; return; }
+    const root = rootOf(o);
+    const { applyImport, describePlan, planImport, undoImport } = await import("./import/claude-code.js");
+    if (o.desfazer) { const r = undoImport(root); console.log(`OK: ${r.skills} skill(s) e ${r.agents} agente(s) removidos (skills ficam na lixeira .trash).`); return; }
+    const plan = planImport(root, { includeAllow: !!o.incluirAllow, includeMemory: !!o.memoria });
+    for (const l of describePlan(plan)) console.log("  " + l);
+    if (!o.aplicar) { console.log(c.muted("\n  prévia: nada foi gravado. Rode de novo com --aplicar.")); return; }
+    const r = applyImport(root, plan);
+    if (r.notes.length) {
+      const g = await GraphStore.open(root);
+      try {
+        for (const n of r.notes) {
+          const [{ c: has }] = await g.run("MATCH (x:Note {id:$id}) RETURN count(x) AS c", { id: n.id });
+          if (Number(has) === 0) await g.run("CREATE (:Note {id:$id, kind:$k, text:$t, refs:$r, ts:$ts})", { id: n.id, k: n.kind, t: n.text, r: [], ts: Date.now() });
+        }
+      } finally { await g.close(); }
+    }
+    console.log(c.ok(`OK: ${r.skills} skill(s) em teste, ${r.pending} pendente(s) (/skills pending), ${r.agents} agente(s), ${r.rules} regra(s), ${r.notes.length} nota(s).`));
+    for (const e of r.errors) console.error(c.warn("  falhou: " + e));
   });
 
 program
@@ -333,7 +365,7 @@ const permissionsCommand = (root: string) => ({
 });
 
 const skillsCommand = (root: string, io: { ask: (q: string, opts?: { force?: boolean }) => Promise<boolean> }, llm: { complete: Complete; model: () => string }) => ({
-  desc: "lista skills; pending | approve <nome> | reject <nome> | consolidate",
+  desc: "lista skills; pending | approve <nome> | reject <nome> | consolidate | stats",
   run: async ([sub, name]: string[]) => {
     if (sub === "consolidate") {
       ui.info("✦ analisando a biblioteca de skills…");
@@ -372,6 +404,13 @@ const skillsCommand = (root: string, io: { ask: (q: string, opts?: { force?: boo
         const avisos = lintSkill(p).warnings.filter((w) => w.startsWith("comando destrutivo")).length;
         ui.print(`  ${c.soft(p.name)} ${c.muted(`(${p.scope}) ${p.description}`)}${avisos ? " " + c.warn(`⚠ ${avisos} comando(s) destrutivo(s)`) : ""}`);
       }
+      return;
+    }
+    if (sub === "stats") {
+      const rows = skillStats(root);
+      if (!rows.length) { ui.print(c.muted("  ainda não há skills automáticas para medir.")); return; }
+      for (const r of rows) ui.print(`  ${c.soft(r.by)} ${c.muted(`${r.created} criadas · ${r.promoted} promovidas · ${r.trial} em teste · ${r.archived} arquivadas · placar ${r.wins}✓/${r.losses}✗ · promoção ${r.promotionRate === null ? "sem veredito" : Math.round(r.promotionRate * 100) + "%"}`)}`);
+      ui.print(c.muted("  promoção = promovidas ÷ (promovidas + arquivadas); skills em teste ainda não contam."));
       return;
     }
     const skills = listSkills(root);
@@ -602,6 +641,8 @@ async function buildApiBackend(root: string, model: string, io: { ask: (q: strin
           const win = contextWindowFor(agent.model);
           const pct = Math.round((agent.contextTokens / win) * 100);
           ui.print(`  ${c.soft(`${fmtTokens(agent.contextTokens)} / ${fmtTokens(win)}`)} ${c.muted(`(${pct}%) · ${agent.messages.length} mensagens · compacta em ~${fmtTokens(compactAtFor(agent.model))}`)}`);
+          const slmLine = slmStatsLine();
+          if (slmLine) ui.print(`  ${c.muted(slmLine)}`);
         },
       },
       "/usage": usageCommand(() => ({ ...agent.usage, costUsd: backend.cost?.() })),

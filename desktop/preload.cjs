@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld("brito", {
   load: () => ipcRenderer.invoke("store:load"),
   save: (state) => ipcRenderer.invoke("store:save", state),
   pickFolder: () => ipcRenderer.invoke("pickFolder"),
+  listDir: (root, rel) => ipcRenderer.invoke("fs:list", { root, rel }),
+  readFile: (root, rel) => ipcRenderer.invoke("fs:read", { root, rel }),
   env: () => ipcRenderer.invoke("env"),
   start: (sessionId, root, claudeId) => ipcRenderer.invoke("backend:start", { sessionId, root, claudeId }),
   write: (sessionId, msg) => ipcRenderer.send("backend:write", { sessionId, msg }),

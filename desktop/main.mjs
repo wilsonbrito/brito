@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { listDir, readPreview } from "./files.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const storePath = process.env.BRITO_DESKTOP_STORE ?? path.join(os.homedir(), ".brito", "desktop.json");
@@ -86,16 +87,31 @@ function startBackend(sessionId, root, claudeId) {
 
 const write = (sessionId, msg) => backends.get(sessionId)?.child.stdin.write(JSON.stringify(msg) + "\n");
 
+// Preview de arquivos: só dentro de pastas que o usuário já adicionou como projeto (ou escolheu no seletor).
+const allowedRoots = new Set();
+const allow = (dir) => { try { if (typeof dir === "string" && dir) allowedRoots.add(fs.realpathSync(dir)); } catch { /* pasta sumiu */ } };
+const allowProjects = (state) => { for (const p of state?.projects ?? []) allow(p?.path); };
+const guarded = (root, fn) => {
+  try {
+    if (!allowedRoots.has(fs.realpathSync(root))) return { ok: false, error: "projeto desconhecido" };
+    return { ok: true, data: fn() };
+  } catch (e) { return { ok: false, error: String(e?.message ?? e) }; }
+};
+ipcMain.handle("fs:list", (_e, { root, rel }) => guarded(root, () => listDir(root, rel)));
+ipcMain.handle("fs:read", (_e, { root, rel }) => guarded(root, () => readPreview(root, rel)));
+
 ipcMain.handle("store:load", () => {
-  try { return JSON.parse(fs.readFileSync(storePath, "utf8")); } catch { return null; }
+  try { const st = JSON.parse(fs.readFileSync(storePath, "utf8")); allowProjects(st); return st; } catch { return null; }
 });
 ipcMain.handle("store:save", (_e, state) => {
+  allowProjects(state);
   fs.mkdirSync(path.dirname(storePath), { recursive: true });
   fs.writeFileSync(storePath + ".tmp", JSON.stringify(state));
   fs.renameSync(storePath + ".tmp", storePath);
 });
 ipcMain.handle("pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"] });
+  if (!r.canceled) allow(r.filePaths[0]);
   return r.canceled ? null : r.filePaths[0];
 });
 ipcMain.handle("backend:start", async (_e, { sessionId, root, claudeId }) => {
@@ -132,6 +148,11 @@ app.whenReady().then(() => {
       while (Date.now() - t0 < cap && !(await busy())) await new Promise((r) => setTimeout(r, 200)); // começou
       while (Date.now() - t0 < cap && (await busy())) await new Promise((r) => setTimeout(r, 500));  // terminou
       await new Promise((r) => setTimeout(r, 800));
+    }
+    // BRITO_SHOT_EVAL="js": roda antes do print (ex.: abrir um painel) e espera BRITO_SHOT_EVAL_WAIT ms (padrão 2500)
+    if (process.env.BRITO_SHOT_EVAL) {
+      await win.webContents.executeJavaScript(process.env.BRITO_SHOT_EVAL).catch((e) => console.error("BRITO_SHOT_EVAL:", e));
+      await new Promise((r) => setTimeout(r, Number(process.env.BRITO_SHOT_EVAL_WAIT ?? 2500)));
     }
     fs.writeFileSync(process.env.BRITO_SHOT, (await win.webContents.capturePage()).toPNG());
     app.quit();

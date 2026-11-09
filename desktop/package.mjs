@@ -32,8 +32,11 @@ for (const [p, hint] of [[electronDist, "npm --prefix desktop install"], [bundle
 /** Copia o app (janela + bundle do backend + módulos nativos) para `appDir`. */
 function copyApp(appDir) {
   fs.mkdirSync(path.join(appDir, "dist"), { recursive: true });
-  for (const f of ["main.mjs", "preload.cjs"]) fs.copyFileSync(path.join(here, f), path.join(appDir, f));
+  for (const f of ["main.mjs", "preload.cjs", "files.mjs"]) fs.copyFileSync(path.join(here, f), path.join(appDir, f));
   fs.cpSync(path.join(here, "renderer"), path.join(appDir, "renderer"), { recursive: true });
+  // Mermaid (diagramas no preview): vem do node_modules do desktop; sem ele os blocos ficam como código.
+  const mermaid = path.join(here, "node_modules", "mermaid", "dist", "mermaid.min.js");
+  if (fs.existsSync(mermaid)) { fs.mkdirSync(path.join(appDir, "renderer", "vendor"), { recursive: true }); fs.copyFileSync(mermaid, path.join(appDir, "renderer", "vendor", "mermaid.min.js")); }
   fs.copyFileSync(bundle, path.join(appDir, "dist", "cli.bundle.mjs"));
   fs.copyFileSync(iconPng, path.join(appDir, "icon.png")); // ícone da janela no Windows/Linux
   // o bundle lê ../package.json (versão) relativo a dist/: este arquivo cumpre os dois papéis

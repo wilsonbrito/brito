@@ -1,4 +1,4 @@
-import { daysSince, deleteSkill, getSkill, lintSkill, listSkills, savePending, saveSkill, writeSkill, type SkillInput } from "./store.js";
+import { daysSince, deleteSkill, getSkill, lintSkill, listArchived, listSkills, savePending, saveSkill, writeSkill, type SkillInput } from "./store.js";
 
 /**
  * Ciclo de vida das skills criadas sozinhas (`BRITO_SKILLS=auto`, o padrão):
@@ -61,7 +61,7 @@ export interface AutoResult { saved: boolean; msg: string }
  * - conteúdo com comando destrutivo também vai para a fila de revisão;
  * - nova skill respeita o teto diário.
  */
-export function saveAuto(root: string, input: SkillInput & { reason: string }, now = Date.now()): AutoResult {
+export function saveAuto(root: string, input: SkillInput & { reason: string }, now = Date.now(), by = ""): AutoResult {
   const prev = getSkill(root, input.name);
   if (prev && prev.origin === "manual") {
     const scope = savePending(root, input, prev.scope);
@@ -76,6 +76,26 @@ export function saveAuto(root: string, input: SkillInput & { reason: string }, n
     const created = listSkills(root, now).filter((s) => s.origin === "auto" && s.created === today).length;
     if (created >= DAILY_LIMIT) return { saved: false, msg: `skill ${input.name} não criada: teto de ${DAILY_LIMIT} skills automáticas por dia` };
   }
-  const r = saveSkill(root, input, prev?.scope ?? "project", { auto: true });
+  const r = saveSkill(root, input, prev?.scope ?? "project", { auto: true, by });
   return { saved: true, msg: r.created ? `skill ${input.name} criada em teste (project, v1)` : `skill ${input.name} atualizada (${r.scope}, v${r.version})` };
+}
+
+export interface ModelStats { by: string; created: number; promoted: number; trial: number; archived: number; wins: number; losses: number; /** promovidas / (promovidas + arquivadas); null = ainda sem veredito */ promotionRate: number | null }
+
+/**
+ * Qualidade da reflexão por modelo gerador: das skills automáticas, quantas foram promovidas e quantas arquivadas.
+ * Só `origin: auto` entra (as manuais não medem o gerador). Autoria vazia = criada antes do registro.
+ */
+export function skillStats(root: string): ModelStats[] {
+  const rows = new Map<string, ModelStats>();
+  const row = (by: string) => rows.get(by) ?? (rows.set(by, { by, created: 0, promoted: 0, trial: 0, archived: 0, wins: 0, losses: 0, promotionRate: null }), rows.get(by)!);
+  const add = (sk: ReturnType<typeof listSkills>[number], kind: "active" | "trial" | "archived") => {
+    const r = row(sk.by || "(sem registro)");
+    r.created++; r.wins += sk.wins; r.losses += sk.losses;
+    if (kind === "active") r.promoted++; else if (kind === "trial") r.trial++; else r.archived++;
+  };
+  for (const s of listSkills(root)) if (s.origin === "auto") add(s, s.status === "trial" ? "trial" : "active");
+  for (const s of listArchived(root)) if (s.origin === "auto") add(s, "archived");
+  for (const r of rows.values()) r.promotionRate = r.promoted + r.archived ? r.promoted / (r.promoted + r.archived) : null;
+  return [...rows.values()].sort((a, b) => b.created - a.created);
 }
