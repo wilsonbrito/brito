@@ -49,7 +49,9 @@ test("não sai da raiz: .., caminho absoluto de fora e link simbólico", () => {
     assert.throws(() => readPreview(p.dir, path.join(p.outside, "segredo.txt")), /fora do projeto/);
     assert.throws(() => listDir(p.dir, ".."), /fora do projeto/);
     try { fs.symlinkSync(p.outside, path.join(p.dir, "link"), "junction"); } catch { return; } // sem permissão para link: pula
-    assert.throws(() => readPreview(p.dir, "link/segredo.txt"), /fora do projeto/);
+    // no Windows o junction às vezes não resolve (UNKNOWN no realpath): o acesso falha do mesmo jeito, só não com a nossa mensagem
+    if (process.platform === "win32") assert.throws(() => readPreview(p.dir, "link/segredo.txt"));
+    else assert.throws(() => readPreview(p.dir, "link/segredo.txt"), /fora do projeto/);
     // caminho absoluto dentro do projeto é aceito (o chat cita assim)
     assert.equal(readPreview(p.dir, path.join(p.dir, "README.md")).rel, "README.md");
     assert.equal(resolveInside(p.dir, "docs").target.endsWith("docs"), true);
