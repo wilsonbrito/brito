@@ -51,7 +51,19 @@ function matchesSession(s, q) {
   return s.items.some((it) => String(it.text ?? it.msg ?? (it.k === "tool" ? preview(it.name, it.input) : "")).toLowerCase().includes(q));
 }
 
+/** Estado visual da sessão: approval (espera você) > busy (rodando) > unread (resposta não lida) > error > idle. */
+function sessionStatus(s) {
+  const r = runtime(s.id);
+  if (r.approvals.length) return ["approval", "Aguardando sua aprovação"];
+  if (r.busy) return ["busy", "Executando"];
+  if (s.unread) return ["unread", "Resposta nova, ainda não lida"];
+  if (s.lastError) return ["error", "A última execução terminou com erro"];
+  return ["idle", "Parada"];
+}
+
 function renderSidebar() {
+  const active = state.sessions.find((x) => x.id === state.activeId);
+  if (active?.unread) active.unread = false; // abrir a sessão = leu
   const box = $("projects");
   box.innerHTML = "";
   const q = filter.toLowerCase();
@@ -59,13 +71,18 @@ function renderSidebar() {
     const list = state.sessions.filter((s) => s.project === p.path && (!q || matchesSession(s, q))).sort((a, b) => b.updated - a.updated);
     if (q && !list.length) continue;
     const g = el("div", "proj");
-    const h = el("div", "proj-h", `<span>${p.path === state.projects[0].path ? "⌂" : "▤"}</span><span></span><button class="add" title="Nova sessão neste projeto">＋</button>`);
+    if (p.color) g.style.setProperty("--pc", p.color);
+    const h = el("div", "proj-h", `<span class="pi"></span><span></span><button class="edit" title="Ícone e cor do projeto">✎</button><button class="add" title="Nova sessão neste projeto">＋</button>`);
+    h.children[0].textContent = p.icon || (p.path === state.projects[0].path ? "⌂" : "▤");
     h.children[1].textContent = p.name;
     h.title = p.path;
+    h.querySelector(".edit").onclick = (e) => { e.stopPropagation(); openStylePicker(p, e.currentTarget); };
+    h.oncontextmenu = (e) => { e.preventDefault(); openStylePicker(p, h.querySelector(".edit")); };
     h.querySelector(".add").onclick = () => newSession(p.path);
     g.append(h);
     for (const s of list) {
-      const row = el("div", "sess" + (s.id === state.activeId ? " on" : ""), `<span class="dot${runtime(s.id).busy ? " busy" : ""}"></span><span class="t"></span><span class="d">${ago(s.updated)}</span><button class="del" title="Apagar">✕</button>`);
+      const [st, stTip] = sessionStatus(s);
+      const row = el("div", "sess" + (s.id === state.activeId ? " on" : "") + (st === "unread" ? " unread" : ""), `<span class="st ${st}" title="${stTip}"></span><span class="t"></span><span class="d">${ago(s.updated)}</span><button class="del" title="Apagar">✕</button>`);
       row.querySelector(".t").textContent = s.title;
       row.onclick = () => { state.activeId = s.id; persist(); renderAll(); };
       row.querySelector(".del").onclick = (e) => { e.stopPropagation(); deleteSession(s.id); };
@@ -216,15 +233,61 @@ function renderTop() {
   if (b === "on") {
     const dot = el("span", "ok"); dot.textContent = "●";
     stb.append(dot, ` Conectado · ${r?.engine === "api" ? "API" : "assinatura"}`);
+    const m = r?.model ? String(r.model).replace(/^claude-/, "") : "";
+    if (m) { const c = el("span", "chip"); c.textContent = m; c.title = r.model; stb.append(c); }
     if (r?.chip) { const c = el("span", "chip" + (r.fallback ? " fb" : "")); c.textContent = r.chip; c.title = "Motor em uso. Envie /fallback para detalhes."; stb.append(c); }
   } else if (b === "starting") { const d = el("span", "bad"); d.textContent = "●"; stb.append(d, " Iniciando backend…"); }
   else stb.textContent = "○ Backend parado";
-  $("st-dir").textContent = s ? projectOf(s)?.path ?? "" : "";
-  const u = r?.usage;
-  $("st-usage").textContent = u ? `${fmtK(u.contextTokens)} contexto${u.costUsd ? ` · $${u.costUsd.toFixed(2)}` : ""}` : "";
+  const full = s ? projectOf(s)?.path ?? "" : "";
+  $("st-dir").textContent = full ? "📁 " + (projectOf(s)?.name || full) : "";
+  $("st-dir").title = full;
+  const u = r?.usage, us = $("st-usage");
+  us.replaceChildren();
+  if (u) {
+    const win = u.contextWindow > 0 ? u.contextWindow : /\[1m\]/i.test(r?.model ?? "") ? 1e6 : 200000;
+    const pct = Math.min(100, (u.contextTokens / win) * 100);
+    const bar = el("span", "ctx", "<i></i>"); bar.firstChild.style.width = pct + "%";
+    if (pct > 80) bar.classList.add("hot");
+    bar.title = `Contexto: ${u.contextTokens.toLocaleString("pt-BR")} tokens (~${pct.toFixed(0)}% de ${fmtK(win)})`;
+    const t = el("span"); t.textContent = fmtK(u.contextTokens);
+    us.append(bar, t);
+    if (u.costUsd) { const c = el("span", "cost"); c.textContent = `$${u.costUsd.toFixed(2)}`; c.title = "Custo estimado da sessão"; us.append(c); }
+  }
 }
 
-function renderAll() { renderSidebar(); renderMessages(); renderTop(); }
+const ICONS = ["⌂", "▤", "★", "⚙", "⚡", "☕", "✎", "♥", "☀", "☾", "♪", "⚑", "✦", "❖", "☘", "⚓", "📚", "🚀", "🧪", "🎨", "🛠", "💡", "🌱", "🔥"];
+const COLORS = ["#8119bd", "#3b82f6", "#06b6d4", "#10b981", "#84cc16", "#eab308", "#f97316", "#ef4444", "#ec4899", "#64748b"];
+
+/** A cor do projeto da sessão ativa vira o destaque (accent) do app. */
+function applyProjectColor() {
+  const c = projectOf(active() ?? {})?.color;
+  const r = document.documentElement.style;
+  if (c) { r.setProperty("--accent", c); r.setProperty("--accent2", c); } else { r.removeProperty("--accent"); r.removeProperty("--accent2"); }
+}
+
+function openStylePicker(p, anchor) {
+  document.getElementById("style-pop")?.remove();
+  const pop = el("div", "style-pop");
+  pop.id = "style-pop";
+  const set = (patch) => { Object.assign(p, patch); for (const k of Object.keys(patch)) if (!patch[k]) delete p[k]; persist(); renderAll(); pop.remove(); };
+  const icons = el("div", "sp-grid");
+  for (const i of ICONS) { const b = el("button", "sp-i" + (p.icon === i ? " on" : "")); b.textContent = i; b.onclick = () => set({ icon: i }); icons.append(b); }
+  const cols = el("div", "sp-grid");
+  for (const c of COLORS) { const b = el("button", "sp-c" + (p.color === c ? " on" : "")); b.style.background = c; b.title = c; b.onclick = () => set({ color: c }); cols.append(b); }
+  const custom = el("input"); custom.type = "color"; custom.value = p.color || "#8119bd"; custom.title = "Cor personalizada";
+  custom.onchange = () => set({ color: custom.value });
+  cols.append(custom);
+  const reset = el("button", "btn2"); reset.textContent = "Restaurar padrão"; reset.onclick = () => set({ icon: "", color: "" });
+  pop.append(el("div", "sp-t", "Ícone"), icons, el("div", "sp-t", "Cor"), cols, reset);
+  document.body.append(pop);
+  const r = anchor.getBoundingClientRect();
+  pop.style.left = Math.min(r.left, innerWidth - pop.offsetWidth - 8) + "px";
+  pop.style.top = Math.min(r.bottom + 4, innerHeight - pop.offsetHeight - 8) + "px";
+  const close = (e) => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener("mousedown", close, true); } };
+  setTimeout(() => document.addEventListener("mousedown", close, true));
+}
+
+function renderAll() { applyProjectColor(); renderSidebar(); renderMessages(); renderTop(); }
 
 // ---------- backend ----------
 const PROTOCOL = 2; // igual a src/desktop/protocol.ts
@@ -266,7 +329,7 @@ function onEvent(sessionId, ev) {
     case "hello": if (ev.protocol !== PROTOCOL) note(s, "warn", `App e CLI desalinhados (protocolo ${PROTOCOL} no app, ${ev.protocol} na CLI): rode \`npm run bundle\` ou atualize o app.`); break;
     case "result": { const f = pendingQ.get(ev.id); pendingQ.delete(ev.id); f?.(ev.data); return; }
     case "ready": r.backend = "on"; r.engine = ev.engine; r.model = ev.model; r.fallback = !!ev.fallback; r.chip = ev.chip; if (s.claudeId !== ev.sessionId) s.claudeId = ev.sessionId; loadModels(sessionId); break;
-    case "turnStart": r.busy = true; break;
+    case "turnStart": r.busy = true; s.lastError = false; break;
     // os pedaços do mesmo bloco se juntam num item só (streaming); textEnd fecha o bloco
     case "text": { const l = s.items[s.items.length - 1]; if (l?.k === "text" && l.open) { l.text += ev.text; bump(l); } else s.items.push({ k: "text", text: ev.text, open: true }); break; }
     case "textEnd": { const l = s.items[s.items.length - 1]; if (l?.k === "text") l.open = false; break; }
@@ -274,10 +337,10 @@ function onEvent(sessionId, ev) {
     case "toolStart": s.items.push({ k: "tool", id: ev.id, name: ev.name, input: ev.input, done: false }); break;
     case "toolEnd": { const t = s.items.find((x) => x.k === "tool" && x.id === ev.id); if (t) { t.done = true; t.isError = ev.isError; t.output = ev.output; bump(t); } break; }
     case "info": break;
-    case "warn": case "error": note(s, ev.t, ev.msg); break;
+    case "warn": case "error": if (ev.t === "error") s.lastError = true; note(s, ev.t, ev.msg); break;
     case "approval": r.approvals.push(ev); if (sessionId === state.activeId) showApproval(); break;
-    case "turnEnd": r.busy = false; s.updated = Date.now(); break;
-    case "usage": r.usage = { contextTokens: ev.contextTokens, costUsd: ev.costUsd }; r.model = ev.model; r.fallback = !!ev.fallback; r.chip = ev.chip; if (ev.sessionId) s.claudeId = ev.sessionId; break;
+    case "turnEnd": r.busy = false; s.updated = Date.now(); if (sessionId !== state.activeId) s.unread = true; break;
+    case "usage": r.usage = { contextTokens: ev.contextTokens, costUsd: ev.costUsd, contextWindow: ev.contextWindow }; r.model = ev.model; r.fallback = !!ev.fallback; r.chip = ev.chip; if (ev.sessionId) s.claudeId = ev.sessionId; break;
     case "closed": r.backend = "off"; if (r.busy || (ev.code && ev.code !== 0)) note(s, "warn", `O backend encerrou${ev.code ? ` (código ${ev.code})` : ""}. Envie outra mensagem para reconectar; a conversa é retomada.`); r.busy = false; for (const t of s.items) { if (t.k === "text") t.open = false; if (t.k === "tool" && !t.done) { t.done = true; t.isError = true; bump(t); } } break;
   }
   persist();
@@ -334,6 +397,7 @@ function answer(allow, scope) {
   const a = runtime(s.id).approvals.shift();
   if (a) api.write(s.id, { t: "approve", id: a.id, allow, ...(scope && !a.force ? { scope } : {}) });
   showApproval();
+  renderSidebar();
 }
 
 // ---------- ligações ----------
