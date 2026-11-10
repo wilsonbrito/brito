@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.12.0 — 2026-11-10
+
+The desktop app now shows its version and updates itself from inside, with no need to download and reinstall by hand.
+
+### Added
+- **Version and "Check for updates" in the desktop app.** Settings (⚙ Configure) has a new VERSION section with the installed version and a **Buscar atualização** button. The app also checks on startup, at most once a day, and shows "⬆ Nova versão X" in the sidebar when there is one.
+- **Update from inside the app.** On Windows, **Atualizar agora** downloads the installer, runs it silently, closes the app and reopens it already updated. On macOS it downloads the `.dmg` and opens it (drag Brito to Applications). On Linux it downloads the `.tar.gz` to Downloads and reveals it (extract and run `./install.sh`).
+- The download is only accepted from this repository's releases and is checked against the release size and SHA-256.
+
+### Notes
+- Versions before 0.12.0 have no updater: install 0.12.0 manually once; from then on, update from inside the app.
+- Windows installers are not code-signed yet, so SmartScreen may warn.
+
 ## 0.11.0 — 2026-11-10
 
 Brito now learns which requests the local model could have handled, and compacts long conversations without spending Claude tokens.

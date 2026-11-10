@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listDir, readPreview } from "./files.mjs";
+import { RELEASES_URL, download, evaluate, fetchLatest } from "./updater.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const storePath = process.env.BRITO_DESKTOP_STORE ?? path.join(os.homedir(), ".brito", "desktop.json");
@@ -119,7 +120,56 @@ ipcMain.handle("backend:start", async (_e, { sessionId, root, claudeId }) => {
 });
 ipcMain.on("backend:write", (_e, { sessionId, msg }) => write(sessionId, msg));
 ipcMain.on("backend:stop", (_e, sessionId) => { write(sessionId, { t: "quit" }); });
-ipcMain.handle("env", () => ({ home: os.homedir(), platform: process.platform, cli: !!cliPath }));
+ipcMain.handle("env", () => ({ home: os.homedir(), platform: process.platform, cli: !!cliPath, version: appVersion() }));
+
+// Atualização: consulta a última Release, baixa o instalador do SO e o aplica (Windows) ou o entrega ao usuário (macOS/Linux).
+function appVersion() {
+  // empacotado: o package.json ao lado é o do app; em desenvolvimento (`electron .`) vale o da raiz do projeto
+  for (const p of [path.join(here, "package.json"), path.join(here, "..", "package.json")]) {
+    try { const j = JSON.parse(fs.readFileSync(p, "utf8")); if (j.name !== "brito-desktop") return j.version; } catch { /* tenta o próximo */ }
+  }
+  return app.getVersion();
+}
+const updateCache = path.join(path.dirname(storePath), "desktop-update.json");
+const DAY = 24 * 3600 * 1000;
+let lastUpdate = null, installing = false;
+ipcMain.handle("update:check", async (_e, { force } = {}) => {
+  const current = appVersion();
+  try {
+    // verificação automática: no máximo uma consulta por dia (o resultado guardado é reavaliado contra a versão atual)
+    let cached = null;
+    try { cached = JSON.parse(fs.readFileSync(updateCache, "utf8")); } catch { /* sem cache */ }
+    if (!force && cached?.release && Date.now() - cached.at < DAY) lastUpdate = evaluate(cached.release, current, process.platform, process.arch);
+    else {
+      const release = await fetchLatest();
+      lastUpdate = evaluate(release, current, process.platform, process.arch);
+      try { fs.mkdirSync(path.dirname(updateCache), { recursive: true }); fs.writeFileSync(updateCache, JSON.stringify({ at: Date.now(), release: { tag_name: release.tag_name, body: release.body, html_url: release.html_url, assets: (release.assets ?? []).map((a) => ({ name: a.name, browser_download_url: a.browser_download_url, size: a.size, digest: a.digest })) } })); } catch { /* cache é opcional */ }
+    }
+    return { ok: true, ...lastUpdate, platform: process.platform };
+  } catch (e) { return { ok: false, current, error: String(e?.message ?? e) }; }
+});
+ipcMain.handle("update:install", async () => {
+  if (installing) return { ok: false, error: "já está baixando" };
+  const u = lastUpdate;
+  if (!u?.available || !u.asset) return { ok: false, error: "nenhuma atualização pendente para este sistema" };
+  installing = true;
+  try {
+    // Windows: pasta temporária (o instalador roda e some). macOS/Linux: Downloads, onde o usuário o encontra.
+    const dir = process.platform === "win32" ? path.join(os.tmpdir(), "brito-update") : app.getPath("downloads");
+    const dest = path.join(dir, path.basename(u.asset.name));
+    await download({ url: u.asset.url, dest, size: u.asset.size, digest: u.asset.digest, onProgress: (received, total) => win?.webContents.send("update:progress", { received, total }) });
+    if (process.platform === "win32") {
+      // Inno Setup em modo silencioso: fecha este app, troca os arquivos e reabre o Brito (ver brito.iss).
+      spawn(dest, ["/SILENT", "/NOCANCEL", "/SP-", "/CLOSEAPPLICATIONS"], { detached: true, stdio: "ignore" }).unref();
+      setTimeout(() => app.quit(), 400);
+      return { ok: true, action: "restarting", path: dest };
+    }
+    if (process.platform === "darwin") { await shell.openPath(dest); return { ok: true, action: "opened", path: dest }; } // monta o .dmg
+    shell.showItemInFolder(dest);
+    return { ok: true, action: "revealed", path: dest };
+  } catch (e) { return { ok: false, error: String(e?.message ?? e) }; } finally { installing = false; }
+});
+ipcMain.handle("update:page", () => shell.openExternal(lastUpdate?.pageUrl?.startsWith("https://github.com/") ? lastUpdate.pageUrl : RELEASES_URL));
 
 function createWindow() {
   win = new BrowserWindow({

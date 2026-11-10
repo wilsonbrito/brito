@@ -5,6 +5,8 @@
 #endif
 
 [Setup]
+CloseApplications=yes
+RestartApplications=no
 AppId={{3C1F7B52-9E04-4D6A-8B1E-5A7D20C4F9E1}
 AppName=Brito
 AppVersion={#AppVersion}
@@ -33,4 +35,4 @@ Name: "{autodesktop}\Brito"; Filename: "{app}\Brito.exe"; IconFilename: "{app}\i
 Name: "desktopicon"; Description: "Criar atalho na Área de Trabalho"; Flags: unchecked
 
 [Run]
-Filename: "{app}\Brito.exe"; Description: "Abrir o Brito"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\Brito.exe"; Description: "Abrir o Brito"; Flags: postinstall nowait

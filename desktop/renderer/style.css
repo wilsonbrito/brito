@@ -176,6 +176,8 @@ select:hover { background: var(--bg); color: var(--fg); }
 #theme-btn { margin-top: auto; text-align: left; color: var(--mute); padding: 8px; }
 #settings-btn { text-align: left; color: var(--mute); padding: 8px; }
 #settings-btn.on, #settings-btn:hover { color: var(--fg, inherit); }
+#update-badge { text-align: left; padding: 8px; color: var(--accent); font-weight: 600; }
+#update-badge:hover { text-decoration: underline; }
 .meter { height: 8px; border-radius: 4px; background: var(--code); overflow: hidden; margin: 8px 0 2px; }
 .meter > i { display: block; height: 100%; background: var(--accent, #6b8afd); }
 .meter > i.warn { background: var(--warn); }

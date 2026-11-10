@@ -11,5 +11,11 @@ contextBridge.exposeInMainWorld("brito", {
   start: (sessionId, root, claudeId) => ipcRenderer.invoke("backend:start", { sessionId, root, claudeId }),
   write: (sessionId, msg) => ipcRenderer.send("backend:write", { sessionId, msg }),
   stop: (sessionId) => ipcRenderer.send("backend:stop", sessionId),
+  update: {
+    check: (force) => ipcRenderer.invoke("update:check", { force: !!force }),
+    install: () => ipcRenderer.invoke("update:install"),
+    openPage: () => ipcRenderer.invoke("update:page"),
+    onProgress: (cb) => ipcRenderer.on("update:progress", (_e, p) => cb(p)),
+  },
   onEvent: (cb) => ipcRenderer.on("brito:event", (_e, p) => cb(p.sessionId, p.ev)),
 });

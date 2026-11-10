@@ -40,7 +40,7 @@ async function refreshPanel() {
     if (id === "skills") nodes = await skillsView(s, q);
     else if (id === "agents") nodes = await agentsView(s);
     else if (id === "files") nodes = pv.tab === "project" ? await projectView(s) : changedView(s);
-    else if (id === "settings") nodes = await settingsView(s);
+    else if (id === "settings") nodes = [...(await versionView()), ...(await settingsView(s))];
     else if (id === "graph") nodes = await graphView(s, q);
     else nodes = await memoryView(s, q);
   } catch (e) { nodes = [txt("div", "pmsg", `Erro: ${e?.message ?? e}`)]; }
@@ -132,6 +132,49 @@ function meterCard(title, percent, detail) {
   return c;
 }
 
+/** Seção VERSÃO: versão instalada, busca de atualização e, havendo uma nova, o botão que baixa e aplica. */
+let upd = null; // último resultado de brito.update.check
+function renderUpdateBadge() {
+  const b = $("update-badge");
+  b.hidden = !upd?.available;
+  if (upd?.available) b.textContent = `⬆ Nova versão ${upd.latest}`;
+}
+async function checkUpdate(force) {
+  upd = await window.brito.update.check(force);
+  renderUpdateBadge();
+  return upd;
+}
+async function versionView() {
+  const cur = (await window.brito.env()).version ?? "?";
+  const out = [txt("div", "sec2", "VERSÃO")];
+  const c = el("div", "card2"), h = el("div", "h"), sub = txt("div", "sub2", "");
+  h.append(txt("b", "", `Brito ${cur}`));
+  const show = (u) => {
+    if (!u) return;
+    sub.replaceChildren();
+    if (!u.ok) return void (sub.textContent = `Não consegui verificar: ${u.error}`);
+    if (!u.available) return void (sub.textContent = "Você está na versão mais recente.");
+    sub.textContent = `Nova versão ${u.latest} disponível.`;
+    if (u.notes) { const pre = el("pre"); pre.textContent = u.notes.slice(0, 1500); sub.append(pre); }
+    if (!u.asset) { sub.append(txt("div", "", "Não há instalador para este sistema."), btn("Abrir página da versão", () => window.brito.update.openPage())); return; }
+    const go = btn(u.platform === "win32" ? "Atualizar agora" : "Baixar atualização", async () => {
+      go.disabled = true;
+      window.brito.update.onProgress(({ received, total }) => { go.textContent = total ? `Baixando… ${Math.round((received / total) * 100)}%` : "Baixando…"; });
+      go.textContent = "Baixando…";
+      const r = await window.brito.update.install();
+      if (!r.ok) { go.disabled = false; go.textContent = "Tentar de novo"; sub.append(txt("div", "", `Falhou: ${r.error}`)); return; }
+      go.textContent = r.action === "restarting" ? "Reiniciando…" : "Baixado";
+      if (r.action === "opened") sub.append(txt("div", "", "O instalador foi aberto: arraste o Brito para a pasta Aplicativos e abra-o de novo."));
+      if (r.action === "revealed") sub.append(txt("div", "", "Baixado em Downloads: extraia o .tar.gz e rode ./install.sh dentro da pasta."));
+    });
+    go.style.marginLeft = "0"; sub.append(go);
+  };
+  h.append(btn("Buscar atualização", async (e) => { e.target.disabled = true; e.target.textContent = "Buscando…"; show(await checkUpdate(true)); e.target.disabled = false; e.target.textContent = "Buscar atualização"; }));
+  c.append(h, sub); out.push(c);
+  show(upd);
+  return out;
+}
+
 async function settingsView(s) {
   const d = await query(s.id, "usage", "force", 12000);
   if (!d || !d.plan) return [txt("div", "pmsg", "Sem resposta do backend (atualize o app e a CLI para a mesma versão).")];
@@ -208,6 +251,9 @@ async function memoryView(s, q) {
 
 document.querySelectorAll("#panel-btns button").forEach((b) => (b.onclick = () => (panelId === b.dataset.panel ? closePanel() : openPanel(b.dataset.panel))));
 $("settings-btn").onclick = () => (panelId === "settings" ? closePanel() : openPanel("settings"));
+$("update-badge").onclick = () => openPanel("settings");
 $("panel-x").onclick = closePanel;
+// verificação automática ao abrir (o main limita a uma consulta por dia); falha de rede é silenciosa
+setTimeout(() => checkUpdate(false).catch(() => {}), 4000);
 $("panel-q").addEventListener("input", () => { clearTimeout(panelTimer); panelTimer = setTimeout(refreshPanel, 250); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && panelId) closePanel(); });
