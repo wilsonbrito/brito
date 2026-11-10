@@ -236,7 +236,7 @@ test("/fallback com SLM em uso mostra o horário de retorno", () => {
 
 import { engineChip } from "../src/provider/fallback.js";
 test("engineChip: diz de onde vem a resposta e destaca o fallback", () => {
-  assert.match(engineChip("claude-sonnet-4-5").text, /nuvem/);
+  assert.match(engineChip("claude-sonnet-4-5").text, /Claude \(nuvem, usa tokens\)/);
   assert.equal(engineChip("claude-sonnet-4-5").fallback, false);
   assert.match(engineChip("slm").text, /local/);
   const s = newFallbackState("claude-sonnet-4-5");

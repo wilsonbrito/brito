@@ -128,7 +128,7 @@ program
 
 program
   .command("slm [acao]")
-  .description("SLM local embutido (llama.cpp): status | pull (baixa o modelo) | rm (apaga). Usado na reflexão de skills; desligue com BRITO_SLM=off")
+  .description("Modelo nativo embutido (llama.cpp, roda na sua máquina, sem tokens): status | pull (baixa) | rm (apaga). Faz reflexão de skills, compactação e digest; desligue com BRITO_SLM=off")
   .action(async (acao: string | undefined) => {
     const st = await slmStatus();
     if (acao === "pull") {
@@ -471,7 +471,7 @@ function makeLearner(getTurns: () => TurnRecord[], ctx: ToolContext, complete: C
 function orchestratorCommand(main: () => string) {
   const usage = "  uso: /orquestrar on|off [modelo <perfil>] [--global] · /orquestrar modelo <perfil> [--global]";
   return {
-    desc: "modo orquestrador: o modelo principal planeja e revisa, um perfil (qwen) implementa",
+    desc: "modo orquestrador: o modelo principal planeja e revisa; um perfil de endpoint (qwen) escreve o código, poupando tokens do Claude",
     run: async (args: string[]) => {
       const global = args.includes("--global");
       const words = args.filter((a) => !a.startsWith("--"));

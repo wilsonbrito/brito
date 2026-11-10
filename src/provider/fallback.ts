@@ -199,7 +199,7 @@ const hhmm = (ms: number) => { const d = new Date(ms); return `${String(d.getHou
  */
 export function engineChip(model: string, fb?: FallbackState): { text: string; fallback: boolean } {
   const r = resolveModel(model);
-  const where = r.kind === "anthropic" ? "☁ nuvem" : (r as { local?: boolean }).local ? "💻 local" : "🌐 endpoint";
+  const where = r.kind === "anthropic" ? "☁ Claude (nuvem, usa tokens)" : (r as { local?: boolean }).local ? "💻 nativo (na sua máquina, sem tokens)" : "🌐 endpoint (servidor próprio)";
   const text = `${where} · ${r.label}`;
   if (!fb?.active) return { text, fallback: false };
   const back = fb.until ? `; Claude volta ${hhmm(fb.until)}` : "; /model para voltar";
