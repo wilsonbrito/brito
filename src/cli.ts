@@ -37,6 +37,9 @@ import { expireTrials, skillStats, skillsMode } from "./skills/trial.js";
 import { claudeCliComplete } from "./skills/learn-cli.js";
 import { pullModel, removeModel, slmStatus, withSlm } from "./local/slm.js";
 import { slmStatsLine } from "./local/stats.js";
+import { shadowRoute, readRoutes } from "./route/log.js";
+import { renderRouteStats } from "./route/stats.js";
+import { routeEnabled } from "./route/decide.js";
 import { usageCommand } from "./usage/command.js";
 import type { TurnRecord } from "./agent/loop.js";
 import type { Msg } from "./provider/types.js";
@@ -425,12 +428,23 @@ const skillsCommand = (root: string, io: { ask: (q: string, opts?: { force?: boo
   },
 });
 
+/** `/route [all]`: o que o decisor de destino (claude/slm/tool) teria feito nos turnos já registrados, em modo sombra. */
+const routeCommand = (root: string) => ({
+  desc: "decisor claude/slm/tool em modo sombra: estatísticas dos turnos (all = todos os repositórios)",
+  run: async (args: string[]) => {
+    const all = args[0] === "all";
+    for (const l of renderRouteStats(readRoutes(all ? undefined : root), all ? "todos os repositórios" : "este repositório", routeEnabled())) ui.print(c.muted(`  ${l}`));
+  },
+});
+
 /** Reflexão pós-turno que propõe skills (gatilho automático ou `/learn`). Independe do backend: só muda a origem do turno e o modelo. */
 function makeLearner(getTurns: () => TurnRecord[], ctx: ToolContext, complete: Complete, getModel: () => string) {
   return async (force = false) => {
     const model = getModel();
     const turns = getTurns();
     const turn = turns[turns.length - 1] ?? null;
+    // Modo sombra do decisor de destino: registra o que ele escolheria e o que o turno exigiu. Não bloqueia o REPL.
+    if (!force) void shadowRoute(ctx.root, turn);
     // O resultado do turno vira evidência para as skills usadas nele (promoção/arquivamento), antes de refletir.
     if (!force) for (const n of [...recordOutcomes(turn, ctx), ...(skillsMode() === "off" ? [] : expireTrials(ctx.root))]) ui.print(c.ok("✦ ") + n);
     if (!force && !shouldReflect(turn, ctx)) { ctx.loadedSkills?.clear(); return; }
@@ -648,6 +662,7 @@ async function buildApiBackend(root: string, model: string, io: { ask: (q: strin
       "/usage": usageCommand(() => ({ ...agent.usage, costUsd: backend.cost?.() })),
       "/index": { desc: "reconstrói o grafo do zero", run: async () => { ui.info("reconstruindo grafo…"); ui.print(c.muted(JSON.stringify(await indexProject(root, graph, { full: true })))); } },
       "/learn": { desc: "extrai skills do último turno agora", run: async () => { await learn(true); } },
+      "/route": routeCommand(root),
       "/skills": skillsCommand(root, io, { complete: withSlm(defaultComplete), model: learnModel }),
       "/permissions": permissionsCommand(root),
       "/todos": { desc: "lista de tarefas da sessão", run: async () => { ctx.todos?.length ? ui.printTodos(ctx.todos) : ui.print(c.muted("  sem lista de tarefas nesta sessão")); } },
@@ -802,6 +817,7 @@ async function buildClaudeBackend(root: string, io: Io, sw: () => SwitchableBack
       "/context": unavailable,
       "/usage": usageCommand(() => ({ ...session.usage, costUsd: session.costUsd })),
       "/learn": { desc: "extrai skills do último turno agora", run: async () => { await learn(true); } },
+      "/route": routeCommand(root),
       "/skills": skillsCommand(root, io, { complete: withSlm(claudeCliComplete), model: () => process.env.BRITO_LEARN_MODEL ?? "" }),
       "/permissions": permissionsCommand(root),
       "/sessions": sessionsCommand(root, () => session.sessionId),
