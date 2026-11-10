@@ -2,14 +2,14 @@
 name: configurar-publicacao-trusted-publishing-npm
 description: Como configurar a publicação do brito-cli no npm usando Trusted Publishing (sem token), confiando no GitHub Actions para autenticação
 version: 1
-uses: 0
+uses: 2
 created: 2026-11-08
 updated: 2026-11-08
-lastUsed: 2026-11-08
+lastUsed: 2026-11-10
 refs: brito-cli
 status: trial
 origin: auto
-wins: 0
+wins: 1
 losses: 0
 ---
 ## Quando usar
