@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.2 — 2026-11-10
+
+The desktop app on Apple Silicon no longer fails to start the graph with `ERR_DLOPEN_FAILED`.
+
+### Fixed
+- **Stuck on the Intel build.** The updater picked the installer by `process.arch`, which reads `x64` when the app runs under Rosetta. A Mac that once installed the Intel `.dmg` downloaded it again on every update. It now uses `app.runningUnderARM64Translation` and moves those Macs to the arm64 build on the next update.
+- **Graph addon depended on Homebrew's OpenSSL.** `lbugjs.node` loads `libssl.3.dylib` and `libcrypto.3.dylib`, and only looked for them in Homebrew and MacPorts. On a Mac without `openssl@3` in the matching architecture the backend did not start. The macOS package now ships both libraries next to the addon (rpath `@loader_path`), signs them, and the build fails if any dependency still points outside the app.
+
 ## 0.13.1 — 2026-11-10
 
 Skills learned at the end of a task are no longer lost because of a description that is too long.

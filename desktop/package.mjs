@@ -63,6 +63,57 @@ function copyApp(appDir) {
   if (bad) throw new Error(`${bad} arquivo(s) copiados incompletos (iCloud?). Rode de novo ou tire o projeto de ~/Documents.`);
 }
 
+/** Pasta com libssl.3/libcrypto.3 do OpenSSL 3 na arquitetura deste build (Homebrew, ou OPENSSL_LIB_DIR). */
+function findOpenSSL() {
+  const cands = [process.env.OPENSSL_LIB_DIR];
+  try { cands.push(path.join(execFileSync("brew", ["--prefix", "openssl@3"], { encoding: "utf8" }).trim(), "lib")); } catch { /* sem brew */ }
+  cands.push("/opt/homebrew/opt/openssl@3/lib", "/usr/local/opt/openssl@3/lib");
+  const want = arch === "arm64" ? "arm64" : "x86_64";
+  for (const dir of cands.filter(Boolean)) {
+    const ssl = path.join(dir, "libssl.3.dylib");
+    if (!fs.existsSync(ssl)) continue;
+    if (execFileSync("lipo", ["-archs", ssl], { encoding: "utf8" }).split(/\s+/).includes(want)) return dir;
+  }
+  throw new Error(`OpenSSL 3 (${want}) não encontrado: brew install openssl@3 ou aponte OPENSSL_LIB_DIR`);
+}
+
+/**
+ * O lbugjs.node do macOS pede @rpath/libssl.3.dylib e libcrypto.3.dylib, e os rpaths dele só apontam para Homebrew e
+ * MacPorts. Sem isto o grafo não carrega num Mac sem o openssl@3 do Homebrew na mesma arquitetura (ERR_DLOPEN_FAILED).
+ * Copia as duas libs ao lado do addon e troca os rpaths por @loader_path. Assina cada binário alterado: no Apple Silicon
+ * dylib sem assinatura válida não carrega, e o `codesign --deep` do app não assina dylib solta em Resources.
+ */
+function bundleOpenSSL(appDir) {
+  const core = path.join(appDir, "node_modules", "@ladybugdb", "core");
+  const addon = path.join(core, "lbugjs.node");
+  const otool = (...a) => execFileSync("otool", a, { encoding: "utf8" });
+  if (!/@rpath\/libssl\.3\.dylib/.test(otool("-L", addon))) return; // versão do addon que já não depende do OpenSSL
+  const libDir = findOpenSSL();
+  const libs = ["libssl.3.dylib", "libcrypto.3.dylib"];
+  for (const n of libs) {
+    const dst = path.join(core, n);
+    fs.copyFileSync(fs.realpathSync(path.join(libDir, n)), dst);
+    fs.chmodSync(dst, 0o755);
+    sh("install_name_tool", ["-id", `@rpath/${n}`, dst], { stdio: "ignore" });
+  }
+  // a libssl do Homebrew aponta para a libcrypto pelo caminho absoluto da Cellar
+  const ssl = path.join(core, "libssl.3.dylib");
+  for (const line of otool("-L", ssl).split("\n")) {
+    const dep = line.trim().split(" ")[0];
+    if (dep.endsWith("/libcrypto.3.dylib") && !dep.startsWith("@")) sh("install_name_tool", ["-change", dep, "@loader_path/libcrypto.3.dylib", ssl], { stdio: "ignore" });
+  }
+  // rpaths de fora (Homebrew/MacPorts) saem: o app usa só as libs que leva
+  const rpaths = [...otool("-l", addon).matchAll(/cmd LC_RPATH\n\s+cmdsize \d+\n\s+path (\S+)/g)].map((m) => m[1]);
+  for (const r of rpaths) sh("install_name_tool", ["-delete_rpath", r, addon], { stdio: "ignore" });
+  sh("install_name_tool", ["-add_rpath", "@loader_path", addon], { stdio: "ignore" });
+  for (const f of [...libs.map((n) => path.join(core, n)), addon]) sh("codesign", ["--force", "--sign", process.env.APPLE_SIGN_IDENTITY || "-", f], { stdio: "ignore" });
+  // falha o build aqui, e não no Mac do usuário: nenhuma dependência pode apontar para fora do app
+  const leaks = [addon, ssl, path.join(core, "libcrypto.3.dylib")].flatMap((f) => otool("-L", f).split("\n").slice(1).map((l) => l.trim().split(" ")[0]))
+    .filter((d) => d && !d.startsWith("@") && !d.startsWith("/usr/lib/") && !d.startsWith("/System/"));
+  if (leaks.length) throw new Error(`addon do grafo ainda depende de libs fora do app: ${leaks.join(", ")}`);
+  console.log(`openssl: ${libDir} → app (rpath @loader_path)`);
+}
+
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
 // Monta e assina fora da pasta do projeto: o iCloud (~/Documents) recoloca atributos estendidos nos arquivos e o codesign os recusa.
@@ -90,6 +141,8 @@ if (plat === "darwin") {
   fs.rmSync(path.join(res, "electron.icns"), { force: true });
   fs.copyFileSync(icns, path.join(res, "icon.icns"));
   copyApp(path.join(res, "app"));
+  sh("xattr", ["-cr", path.join(res, "app")]); // o codesign das libs recusa atributos estendidos
+  bundleOpenSSL(path.join(res, "app"));
   const plist = path.join(appPath, "Contents", "Info.plist");
   const set = (k, v) => sh("plutil", ["-replace", k, "-string", v, plist]);
   set("CFBundleName", "Brito"); set("CFBundleDisplayName", "Brito"); set("CFBundleIdentifier", "dev.brito.desktop");
