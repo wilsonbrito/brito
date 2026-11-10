@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.1 — 2026-11-10
+
+Skills learned at the end of a task are no longer lost because of a description that is too long.
+
+### Fixed
+- **"skill não salva: description deve ter 10–200 chars".** The model that reviews each turn and proposes skills was never told the 10–200 character limit for the description (with the `claude` CLI backend it does not see the `skill_save` schema), so a long description made the whole skill be dropped. The limit is now in its instructions, and a description over 200 characters is trimmed at a word boundary (ending in "…") instead of being refused. You still review the skill before it becomes active. Skill consolidation gets the same treatment, so its proposals are no longer silently discarded.
+- The validation error now says how long the description was.
+
 ## 0.13.0 — 2026-11-10
 
 The desktop app's "who writes the code" selector is clear now, the local Qwen3-4B can be picked, and the Qwen endpoint with a key is set up from inside ⚙ Configure.
