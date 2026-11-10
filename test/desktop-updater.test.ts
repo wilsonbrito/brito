@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 // @ts-ignore módulo .mjs do desktop, sem tipos
-import { compareVersions, download, evaluate, pickAsset } from "../desktop/updater.mjs";
+import { compareVersions, download, evaluate, hostArch, pickAsset } from "../desktop/updater.mjs";
 
 const BASE = "https://github.com/wilsonbrito/brito/releases/download/v0.12.0/";
 const assets = ["Brito-0.12.0-windows-x64-setup.exe", "Brito-0.12.0-macos-arm64.dmg", "Brito-0.12.0-macos-x64.dmg", "Brito-0.12.0-linux-x64.tar.gz"]
@@ -26,6 +26,14 @@ test("pickAsset escolhe o instalador de cada plataforma", () => {
   assert.match(pickAsset(assets, "linux", "x64").name, /linux-x64\.tar\.gz$/);
   assert.equal(pickAsset(assets, "linux", "arm64"), null);
   assert.equal(pickAsset(assets, "freebsd", "x64"), null);
+});
+
+test("hostArch: app x64 em Rosetta pede o instalador arm64", () => {
+  assert.equal(hostArch("x64", true), "arm64");
+  assert.equal(hostArch("x64", false), "x64");
+  assert.equal(hostArch("arm64", false), "arm64");
+  assert.equal(hostArch("x64", undefined), "x64"); // Linux: a propriedade não existe
+  assert.match(pickAsset(assets, "darwin", hostArch("x64", true)).name, /macos-arm64\.dmg$/);
 });
 
 test("evaluate: só marca como disponível quando a release é mais nova", () => {

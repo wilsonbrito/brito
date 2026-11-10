@@ -27,6 +27,14 @@ export function compareVersions(a, b) {
   return x.pre < y.pre ? -1 : 1;
 }
 
+/**
+ * Arquitetura real da máquina. Em Rosetta (app x64 num Mac Apple Silicon) `process.arch` diz "x64"; sem isto o updater
+ * baixaria o .dmg x64 de novo a cada versão e o app nunca sairia da emulação. `translated` = app.runningUnderARM64Translation.
+ */
+export function hostArch(arch, translated) {
+  return translated ? "arm64" : arch;
+}
+
 /** Instalador desta plataforma entre os assets da release (nomes definidos em desktop/package.mjs e brito.iss). */
 export function pickAsset(assets, platform, arch) {
   const a = arch === "arm64" ? "arm64" : "x64";

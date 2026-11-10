@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listDir, readPreview } from "./files.mjs";
-import { RELEASES_URL, download, evaluate, fetchLatest } from "./updater.mjs";
+import { RELEASES_URL, download, evaluate, fetchLatest, hostArch } from "./updater.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const storePath = process.env.BRITO_DESKTOP_STORE ?? path.join(os.homedir(), ".brito", "desktop.json");
@@ -170,6 +170,8 @@ function appVersion() {
 }
 const updateCache = path.join(path.dirname(storePath), "desktop-update.json");
 const DAY = 24 * 3600 * 1000;
+// Em Rosetta o updater precisa oferecer o .dmg arm64, senão o app fica preso no x64 (e o addon do grafo não carrega).
+const updateArch = hostArch(process.arch, app.runningUnderARM64Translation);
 let lastUpdate = null, installing = false;
 ipcMain.handle("update:check", async (_e, { force } = {}) => {
   const current = appVersion();
@@ -177,10 +179,10 @@ ipcMain.handle("update:check", async (_e, { force } = {}) => {
     // verificação automática: no máximo uma consulta por dia (o resultado guardado é reavaliado contra a versão atual)
     let cached = null;
     try { cached = JSON.parse(fs.readFileSync(updateCache, "utf8")); } catch { /* sem cache */ }
-    if (!force && cached?.release && Date.now() - cached.at < DAY) lastUpdate = evaluate(cached.release, current, process.platform, process.arch);
+    if (!force && cached?.release && Date.now() - cached.at < DAY) lastUpdate = evaluate(cached.release, current, process.platform, updateArch);
     else {
       const release = await fetchLatest();
-      lastUpdate = evaluate(release, current, process.platform, process.arch);
+      lastUpdate = evaluate(release, current, process.platform, updateArch);
       try { fs.mkdirSync(path.dirname(updateCache), { recursive: true }); fs.writeFileSync(updateCache, JSON.stringify({ at: Date.now(), release: { tag_name: release.tag_name, body: release.body, html_url: release.html_url, assets: (release.assets ?? []).map((a) => ({ name: a.name, browser_download_url: a.browser_download_url, size: a.size, digest: a.digest })) } })); } catch { /* cache é opcional */ }
     }
     return { ok: true, ...lastUpdate, platform: process.platform };
