@@ -148,7 +148,7 @@ select:hover { background: var(--bg); color: var(--fg); }
 .ctx { width: 60px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .ctx i { display: block; height: 100%; background: var(--accent2); }
 .ctx.hot i { background: var(--warn); }
-.cost { padding: 0 8px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg); }
+.cost, .tok { padding: 0 8px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg); }
 .ok { color: var(--ok); } .bad { color: var(--warn); }
 
 #modal { position: fixed; inset: 0; background: #0009; display: flex; align-items: center; justify-content: center; }

@@ -349,7 +349,7 @@ class UI {
    * Barra de status: cada indicador tem um rótulo para quem não conhece os números.
    * Se não couber na largura do terminal, descarta primeiro os de menor prioridade (tempo, extra, tokens…).
    */
-  statusLine(s: { model: string; ctxTokens: number; ctxWindow: number; input: number; output: number; cacheRead?: number; startedAt: number; extra?: string; cost?: number; mode?: string; project?: string; engine?: { text: string; fallback: boolean } }) {
+  statusLine(s: { model: string; ctxTokens: number; ctxWindow: number; input: number; output: number; cacheRead?: number; startedAt: number; extra?: string; cost?: number; mode?: string; project?: string; engine?: { text: string; fallback: boolean }; slm?: { calls: number; tokensIn: number; tokensOut: number } | null }) {
     const pct = Math.min(100, Math.round((s.ctxTokens / s.ctxWindow) * 100));
     const slots = 8, filled = Math.round((pct / 100) * slots);
     const colour = pct >= 95 ? c.err : pct >= 80 ? c.rgb(palette.orange) : pct >= 50 ? c.warn : c.ok;
@@ -370,6 +370,7 @@ class UI {
       [0, label("contexto") + c.muted(`${fmtTokens(s.ctxTokens)}/${fmtTokens(s.ctxWindow)}`) + ` [${bar}] ${colour(`${pct}%`)}`],
       ...(hit !== undefined ? [[2, label("cache") + hitColour(`◎ ${Math.round(hit)}%`)] as [number, string]] : []),
       [3, label("tokens") + c.muted(`↑${fmtTokens(s.input)} ↓${fmtTokens(s.output)}`)],
+      ...(s.slm ? [[3, c.light("💻 ") + label("slm") + c.muted(`${s.slm.calls}× ↑${fmtTokens(s.slm.tokensIn)} ↓${fmtTokens(s.slm.tokensOut)}`)] as [number, string]] : []),
       ...(s.cost !== undefined ? [[1, label("custo") + c.muted(`$${s.cost.toFixed(2)}`)] as [number, string]] : []),
       ...(this.activeSkill ? [[1, c.light("🎓 ") + label("skill") + c.bold(c.soft(this.activeSkill))] as [number, string]] : []),
       [4, label("tempo") + c.muted(mins < 1 ? "<1m" : `${mins}m`) + (active >= 1000 ? c.dim(` (ativo ${fmtDur(active)})`) : "")],
@@ -391,8 +392,9 @@ class UI {
       ["contexto", "tokens que o modelo está lendo agora / tamanho máximo da janela. Perto de 100% a conversa precisa ser compactada."],
       ["cache", "% do prompt reaproveitado do cache (◎). Alto (verde) = respostas mais rápidas e baratas. Some enquanto não há dado."],
       ["tokens", "total da sessão: ↑ enviados ao modelo (inclui cache) · ↓ gerados por ele."],
-      ["custo", "gasto estimado da sessão em dólares."],
-      ["motor", "de onde vêm as respostas: ☁ nuvem (Claude), 🌐 endpoint (ex.: qwen) ou 💻 local (SLM). ⚠ FALLBACK = troca automática ativa, com a hora em que o Claude é tentado de novo."],
+      ["custo", "gasto estimado da sessão em dólares (só o Claude; o SLM local roda de graça no seu computador)."],
+      ["slm", "💻 trabalho feito pelo modelo local: nº de chamadas × tokens lidos ↑ e gerados ↓ (estimativa). Não gasta plano nem dinheiro. Só aparece depois do primeiro uso."],
+      ["motor", "quem está respondendo: 💻 nativo = modelo embutido que roda na sua máquina (sem tokens, sem custo); ☁ Claude = nuvem, consome tokens; 🌐 endpoint = servidor seu (ex.: Qwen). ⚠ FALLBACK = troca automática ativa, com a hora em que o Claude é tentado de novo."],
       ["tempo", "há quanto tempo a sessão está aberta · (ativo) soma do tempo gasto em todos os turnos."],
       ["📁", "projeto (pasta) em que o Brito está trabalhando — também aparece no título da janela do terminal."],
       ["skill", "skill carregada (skill_load) no turno em andamento."],

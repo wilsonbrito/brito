@@ -236,7 +236,7 @@ function renderTop() {
     stb.append(dot, ` Conectado · ${r?.engine === "api" ? "API" : "assinatura"}`);
     const m = r?.model ? String(r.model).replace(/^claude-/, "") : "";
     if (m) { const c = el("span", "chip"); c.textContent = m; c.title = r.model; stb.append(c); }
-    if (r?.chip) { const c = el("span", "chip" + (r.fallback ? " fb" : "")); c.textContent = r.chip; c.title = "Motor em uso. Envie /fallback para detalhes."; stb.append(c); }
+    if (r?.chip) { const c = el("span", "chip" + (r.fallback ? " fb" : "")); c.textContent = r.chip; c.title = "Quem está respondendo agora: 💻 nativo roda na sua máquina e não usa tokens; ☁ Claude usa tokens. /fallback mostra detalhes."; stb.append(c); }
   } else if (b === "starting") { const d = el("span", "bad"); d.textContent = "●"; stb.append(d, " Iniciando backend…"); }
   else stb.textContent = "○ Backend parado";
   const full = s ? projectOf(s)?.path ?? "" : "";
@@ -252,6 +252,17 @@ function renderTop() {
     bar.title = `Contexto: ${u.contextTokens.toLocaleString("pt-BR")} tokens (~${pct.toFixed(0)}% de ${fmtK(win)})`;
     const t = el("span"); t.textContent = fmtK(u.contextTokens);
     us.append(bar, t);
+    const k = u.tokens;
+    if (k && (k.input || k.output)) {
+      const e = el("span", "tok"); e.textContent = `☁ ↑${fmtK(k.input)} ↓${fmtK(k.output)}`;
+      e.title = `Claude (nuvem), nesta sessão: ${k.input.toLocaleString("pt-BR")} tokens enviados (inclui cache de ${(k.cacheRead ?? 0).toLocaleString("pt-BR")}) · ${k.output.toLocaleString("pt-BR")} gerados`;
+      us.append(e);
+    }
+    if (u.slm) {
+      const e = el("span", "tok"); e.textContent = `💻 ${u.slm.calls}× ↑${fmtK(u.slm.tokensIn)} ↓${fmtK(u.slm.tokensOut)}`;
+      e.title = `SLM local (sem custo): ${u.slm.calls} chamadas, ~${u.slm.tokensIn.toLocaleString("pt-BR")} tokens lidos e ~${u.slm.tokensOut.toLocaleString("pt-BR")} gerados (estimativa)`;
+      us.append(e);
+    }
     if (u.costUsd) { const c = el("span", "cost"); c.textContent = `$${u.costUsd.toFixed(2)}`; c.title = "Custo estimado da sessão"; us.append(c); }
   }
 }
@@ -353,7 +364,7 @@ function onEvent(sessionId, ev) {
     case "warn": case "error": if (ev.t === "error") s.lastError = true; note(s, ev.t, ev.msg); break;
     case "approval": r.approvals.push(ev); if (sessionId === state.activeId) showApproval(); break;
     case "turnEnd": r.busy = false; s.updated = Date.now(); if (sessionId !== state.activeId) s.unread = true; break;
-    case "usage": r.usage = { contextTokens: ev.contextTokens, costUsd: ev.costUsd, contextWindow: ev.contextWindow }; r.model = ev.model; r.fallback = !!ev.fallback; r.chip = ev.chip; if (ev.sessionId) s.claudeId = ev.sessionId; break;
+    case "usage": r.usage = { contextTokens: ev.contextTokens, costUsd: ev.costUsd, contextWindow: ev.contextWindow, tokens: ev.usage, slm: ev.slm }; r.model = ev.model; r.fallback = !!ev.fallback; r.chip = ev.chip; if (ev.sessionId) s.claudeId = ev.sessionId; break;
     case "closed": r.backend = "off"; if (r.busy || (ev.code && ev.code !== 0)) note(s, "warn", `O backend encerrou${ev.code ? ` (código ${ev.code})` : ""}. Envie outra mensagem para reconectar; a conversa é retomada.`); r.busy = false; for (const t of s.items) { if (t.k === "text" || t.k === "skill") t.open = false; if (t.k === "tool" && !t.done) { t.done = true; t.isError = true; bump(t); } } break;
   }
   persist();

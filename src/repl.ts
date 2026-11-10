@@ -6,6 +6,7 @@ import { randomBytes } from "node:crypto";
 import { Dock, type Command } from "./ui/dock.js";
 import os from "node:os";
 import { ui, c, fmtTokens, type BannerInfo } from "./ui/ui.js";
+import { slmUsage } from "./local/stats.js";
 import { cols } from "./ui/theme.js";
 import { engineChip, type FallbackState } from "./provider/fallback.js";
 
@@ -131,7 +132,7 @@ export async function runRepl(b: ReplBackend, o: ReplOpts) {
     mode: modeChip(),
     engine: engineChip(b.model(), b.fallback?.()),
     model: b.model(), ctxTokens: b.contextTokens(), ctxWindow: b.ctxWindow,
-    input: b.usage().input, output: b.usage().output, cacheRead: b.usage().cacheRead, startedAt: o.startedAt, cost: b.cost?.(),
+    input: b.usage().input, output: b.usage().output, cacheRead: b.usage().cacheRead, startedAt: o.startedAt, cost: b.cost?.(), slm: slmUsage(),
     extra: `${skillCount} ${skillCount === 1 ? "skill" : "skills"}`,
   });
 

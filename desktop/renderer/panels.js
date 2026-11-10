@@ -148,7 +148,13 @@ async function settingsView(s) {
   const c = el("div", "card2");
   c.append(txt("div", "", `↑${fmtTok(u.input)}  ↓${fmtTok(u.output)}  · cache ${fmtTok(u.cacheRead)}${d.session?.costUsd ? `  · US$ ${d.session.costUsd.toFixed(2)}` : ""}`),
     txt("div", "sub2", `${d.model ?? ""} · contexto ${fmtTok(d.session?.contextTokens)}${d.session?.contextWindow ? " / " + fmtTok(d.session.contextWindow) : ""}`));
-  out.push(c, btn("Atualizar", refreshPanel));
+  out.push(c);
+  out.push(txt("div", "sec2", "MODELO NATIVO (NA SUA MÁQUINA, SEM TOKENS)"));
+  const l = d.slm, lc = el("div", "card2");
+  if (l) lc.append(txt("div", "", `${l.calls} chamadas  · ↑${fmtTok(l.tokensIn)}  ↓${fmtTok(l.tokensOut)} (estimado)`),
+    txt("div", "sub2", `${(l.ms / 1000).toFixed(1)}s de processamento${l.tokensSaved ? ` · ~${fmtTok(l.tokensSaved)} tokens poupados do Claude na compactação` : ""}`));
+  else lc.append(txt("div", "sub2", "Não usado nesta sessão."));
+  out.push(lc, btn("Atualizar", refreshPanel));
   return out;
 }
 

@@ -5,6 +5,7 @@ import path from "node:path";
 import type Anthropic from "@anthropic-ai/sdk";
 import { globalHome } from "../skills/store.js";
 import type { Complete } from "../skills/learn.js";
+import { recordSlmCall } from "./stats.js";
 
 /**
  * SLM embutido (llama.cpp via `node-llama-cpp`, dependência OPCIONAL): roda dentro do processo, sem servidor.
@@ -105,11 +106,15 @@ export async function slmGenerate(o: GenerateOptions): Promise<string> {
   const lib = await loadLib();
   const { model, llama } = await ensureLoaded();
   const context = await model.createContext({ contextSize: { max: 8192 } });
+  const t0 = Date.now();
+  let out = "";
   try {
     const session = new lib.LlamaChatSession({ contextSequence: context.getSequence(), systemPrompt: o.system });
     const grammar = o.schema ? await llama.createGrammarForJsonSchema(o.schema) : undefined;
-    return await session.prompt(o.user, { grammar, maxTokens: o.maxTokens ?? 1500, temperature: o.temperature ?? 0.2, signal: o.signal });
+    out = await session.prompt(o.user, { grammar, maxTokens: o.maxTokens ?? 1500, temperature: o.temperature ?? 0.2, signal: o.signal });
+    return out;
   } finally {
+    recordSlmCall(o.system.length + o.user.length, out.length, Date.now() - t0);
     await context.dispose();
     scheduleUnload();
   }
@@ -138,6 +143,8 @@ export async function slmChat(o: ChatOptions): Promise<ChatResult> {
   const lib = await loadLib();
   const { model } = await ensureLoaded();
   const context = await model.createContext({ contextSize: { max: slmChatCtx() } });
+  const t0 = Date.now();
+  let outChars = 0;
   try {
     const chat = new lib.LlamaChat({ contextSequence: context.getSequence() });
     const functions = o.functions && Object.keys(o.functions).length
@@ -148,8 +155,10 @@ export async function slmChat(o: ChatOptions): Promise<ChatResult> {
       onTextChunk: (t: string) => { if (t) o.onText?.(t); },
     });
     const calls: ChatCall[] = (res.functionCalls ?? []).map((c: any) => ({ name: String(c.functionName), input: c.params ?? {} }));
+    outChars = String(res.response ?? "").length + JSON.stringify(calls).length;
     return { text: String(res.response ?? ""), calls, truncated: res.metadata?.stopReason === "maxTokens" };
   } finally {
+    recordSlmCall(JSON.stringify(o.history).length + (o.functions ? JSON.stringify(o.functions).length : 0), outChars, Date.now() - t0);
     await context.dispose();
     scheduleUnload();
   }
