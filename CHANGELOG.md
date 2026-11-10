@@ -15,6 +15,9 @@ The desktop app's "who writes the code" selector is clear now, the local Qwen3-4
 - A hand-written `qwen` profile in `~/.brito/config.json` is never overwritten or removed by the app.
 - `config.json` is now written atomically (temp file + rename).
 
+### Changed
+- Desktop: the conversation, panels and documents now use the full width of the window.
+
 ### Fixed
 - The "who writes the code" selector now shows what the backend really turned on, instead of staying on an option that was refused.
 
