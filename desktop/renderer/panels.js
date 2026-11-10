@@ -4,6 +4,14 @@ let panelId = null, panelTimer;
 const txt = (tag, cls, s) => { const e = el(tag, cls); e.textContent = s ?? ""; return e; };
 const btn = (label, fn) => { const b = txt("button", "btn2", label); b.onclick = fn; return b; };
 
+/** Botão Skills com o nº de propostas pendentes da sessão ativa (vem do evento `skill` e do painel). */
+function renderSkillsBadge() {
+  const b = document.querySelector('#panel-btns button[data-panel="skills"]');
+  const s = active();
+  const n = s ? runtime(s.id).pendingSkills ?? 0 : 0;
+  if (b) { b.textContent = n ? `Skills (${n})` : "Skills"; b.classList.toggle("pend", n > 0); }
+}
+
 async function openPanel(id) {
   const s = active();
   if (!s) return;
@@ -44,6 +52,7 @@ async function skillsView(s, q) {
   const d = await query(s.id, "skills", "");
   if (!d) return [txt("div", "pmsg", "Sem resposta do backend.")];
   const out = [];
+  runtime(s.id).pendingSkills = d.pending.length; renderSkillsBadge();
   const act = async (op, name) => { const r = await action(s.id, op, name); note(s, r.ok ? "info" : "error", r.msg); renderMessages(); refreshPanel(); };
   if (d.pending.length) {
     out.push(txt("div", "sec2", `PROPOSTAS PENDENTES (${d.pending.length})`));

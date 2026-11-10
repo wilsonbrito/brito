@@ -27,13 +27,19 @@ import type { TurnSink } from "../agent/sink.js";
 import { openGraphAfterClaude } from "../graph/store.js";
 import { indexProject } from "../graph/indexer.js";
 import { initialEffort, initialModel, isEffort, loadProfiles, MODEL_ALIASES, type Effort } from "../model.js";
-import { NO_ANTHROPIC, fallbackStatus, openEngine } from "../engine.js";
+import { NO_ANTHROPIC, fallbackStatus, learnerModel, openEngine } from "../engine.js";
 import { engineChip, activateFallback, chooseModel, cliShouldFallBack, fallbackWarning, newFallbackState, renderFallback, retryPrompt, type FallbackState } from "../provider/fallback.js";
 import { contextWindowFor, resolveModel } from "../provider/resolve.js";
 import type { Msg } from "../provider/types.js";
 import { PLAN_NOTE, perms, type PermMode } from "../permissions.js";
 import { ORCH_NOTE, implStatus, mainTools, orch, orchGuard, restoreOrch } from "../orchestrator.js";
-import { getSkill, listBuiltins, listSkills, skillsIndex } from "../skills/store.js";
+import { getSkill, listBuiltins, listPending, listSkills, skillsIndex } from "../skills/store.js";
+import { defaultComplete, recordOutcomes, reflect, shouldReflect, type Complete } from "../skills/learn.js";
+import { claudeCliComplete } from "../skills/learn-cli.js";
+import { autoConsolidate } from "../skills/consolidate.js";
+import { expireTrials, skillsMode } from "../skills/trial.js";
+import { withSlm } from "../local/slm.js";
+import { shadowRoute } from "../route/log.js";
 import type { ToolContext } from "../tools/registry.js";
 
 /**
@@ -54,6 +60,7 @@ const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "clear", description: "limpa a conversa", kind: "builtin" },
   { name: "fallback", description: "estado do fallback Claude → modelo local", kind: "builtin" },
   { name: "help", description: "lista os comandos", kind: "builtin" },
+  { name: "learn", description: "extrai skills do último turno agora", kind: "builtin" },
 ];
 
 /** Arquivos do projeto para o `@`: git ls-files (respeita .gitignore); sem git, uma varredura rasa. */
@@ -104,6 +111,34 @@ const sink: TurnSink = {
   error: (msg) => emit({ t: "error", msg }),
 };
 
+/**
+ * Reflexão pós-turno que propõe skills (gatilho automático ou `/learn`), igual à do terminal, mas avisando a janela
+ * com eventos `skill` (refletindo → resultado + nº de propostas pendentes) em vez de imprimir.
+ */
+function makeLearner(getTurns: () => TurnRecord[], ctx: ToolContext, complete: Complete, getModel: () => string) {
+  let seen: TurnRecord | null = null; // turno já analisado: um turno abortado/falho não reanalisa o anterior
+  const done = (notes: string[]) => emit({ t: "skill", phase: "done", notes, pending: listPending(ctx.root).length });
+  return async (force = false) => {
+    const turns = getTurns();
+    const turn = turns[turns.length - 1] ?? null;
+    if (!force && turn === seen) return;
+    if (!force) void shadowRoute(ctx.root, turn); // modo sombra do decisor de destino; não bloqueia
+    const model = getModel();
+    try {
+      const outcomes = force ? [] : [...recordOutcomes(turn, ctx), ...(skillsMode() === "off" ? [] : expireTrials(ctx.root))];
+      if (!force && !shouldReflect(turn, ctx)) { seen = turn; ctx.loadedSkills?.clear(); if (outcomes.length) done(outcomes); return; }
+      if (!turn) { emit({ t: "skill", phase: "done", notes: ["Nada para refletir ainda."], pending: listPending(ctx.root).length }); return; }
+      seen = turn;
+      emit({ t: "skill", phase: "reflecting" });
+      const notes = await reflect(turn, ctx, model, complete, turns[turns.length - 2]);
+      if (skillsMode() === "auto") {
+        try { notes.push(...await autoConsolidate(ctx.root, model, complete)); } catch { /* manutenção é opcional */ }
+      }
+      done([...outcomes, ...(notes.length ? notes : ["nenhuma skill nova"])]);
+    } catch (e: any) { emit({ t: "skill", phase: "error", notes: [`reflexão falhou: ${e?.message ?? e}`], pending: listPending(ctx.root).length }); }
+  };
+}
+
 /** O que a janela precisa de um motor, seja a API direta ou o claude CLI. */
 interface Engine {
   kind: "api" | "claude";
@@ -117,6 +152,8 @@ interface Engine {
   reset(): void;
   stats(): { usage: unknown; contextTokens: number; contextWindow?: number; costUsd: number };
   close(): Promise<void>;
+  /** reflexão pós-turno que propõe skills (`force` = comando /learn) */
+  learn(force?: boolean): Promise<void>;
   /** estado do fallback Claude → qwen e o motor do principal, para o `/fallback` */
   fallback: FallbackState;
   engineLabel(model: string): string;
@@ -195,6 +232,7 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
     if (o.session?.messages) agent.messages = repairHistory(o.session.messages);
     if (o.session?.todos) ctx.todos = o.session.todos;
     let ac: AbortController | null = null;
+    const learn = makeLearner(() => agent.recentTurns, ctx, withSlm(defaultComplete), () => learnerModel(agent.model, process.env));
     const id = o.session?.id ?? randomUUID();
     // Depois de uma troca a partir do claude CLI quem guarda a conversa é ele (o id é o dele): nada a salvar aqui.
     const persist = () => {
@@ -203,7 +241,7 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
       catch (e: any) { sink.warn(`não consegui salvar a sessão: ${e?.message ?? e}`); }
     };
     return {
-      kind: "api", effort: "", fallback,
+      kind: "api", effort: "", fallback, learn,
       // Depois da troca o id segue o do claude: a janela o guarda para retomar a conversa ao reabrir.
       get sessionId() { return o.back?.engine.sessionId ?? id; },
       get model() { return agent.model; }, set model(m: string) { agent.model = m; },
@@ -272,6 +310,9 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
       // Dentro do Electron o executável é o próprio app: este env o faz agir como Node nos filhos (claude → mcp-serve).
       env: process.versions.electron || process.env.ELECTRON_RUN_AS_NODE ? { ELECTRON_RUN_AS_NODE: "1" } : undefined,
     });
+    // O grafo fica com o servidor MCP; skill_save só usa o store de skills, então `graph` não é tocado.
+    const learnCtx: ToolContext = { root, graph: undefined as unknown as ToolContext["graph"], ask, sync: async () => {}, dirty: false, loadedSkills: session.loadedSkills };
+    const learn = makeLearner(() => session.recentTurns, learnCtx, withSlm(claudeCliComplete), () => process.env.BRITO_LEARN_MODEL ?? "");
     if (resumeId) session.resume(resumeId);
     let resumed = !!resumeId; // até o primeiro reset
     session.effort = initialEffort();
@@ -279,7 +320,7 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
     /** Fechamento do grafo do modo API na volta para cá (ver `back.release`). */
     let graphReleased: Promise<void> = Promise.resolve();
     const claude = {
-      kind: "claude", fallback,
+      kind: "claude", fallback, learn,
       get sessionId() { return session.sessionId; },
       get model() { return session.model; },
       get effort() { return session.effort; }, set effort(e: string) { session.effort = e; },
@@ -349,7 +390,10 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
           text = `Invoquei a skill ${sk.name}. Chame skill_load("${sk.name}") agora e siga-a.${ctxText ? `\n\nContexto: ${ctxText}` : "\n\n(Sem contexto extra: comece perguntando sobre o que quero trabalhar.)"}`;
         }
         busy = true;
-        try { await engine.send(text); } finally {
+        try {
+          if (cmd === "/learn") await engine.learn(true);
+          else { await engine.send(text); await engine.learn(); }
+        } finally {
           busy = false;
           emit({ t: "usage", ...engine.stats(), model: engine.model, sessionId: engine.sessionId, fallback: engine.fallback.active, chip: chipOf(engine.model, engine.fallback) });
         }

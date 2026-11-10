@@ -217,6 +217,7 @@ function renderTodos() {
 }
 
 function renderTop() {
+  if (typeof renderSkillsBadge === "function") renderSkillsBadge();
   renderTodos();
   const s = active();
   const r = s && runtime(s.id);
@@ -337,11 +338,23 @@ function onEvent(sessionId, ev) {
     case "toolStart": s.items.push({ k: "tool", id: ev.id, name: ev.name, input: ev.input, done: false }); break;
     case "toolEnd": { const t = s.items.find((x) => x.k === "tool" && x.id === ev.id); if (t) { t.done = true; t.isError = ev.isError; t.output = ev.output; bump(t); } break; }
     case "info": break;
+    // reflexão pós-turno: "refletindo…" vira o resultado (cartão com nota por skill); o botão Skills mostra as pendentes
+    case "skill": {
+      const open = [...s.items].reverse().find((x) => x.k === "skill" && x.open);
+      if (ev.phase === "reflecting") { if (!open) s.items.push({ k: "skill", msg: "✦ refletindo sobre a tarefa para extrair skills…", open: true }); break; }
+      const msgs = (ev.notes ?? []).map((n) => "✦ " + n);
+      if (open) { open.open = false; open.msg = msgs.shift() ?? ""; bump(open); }
+      for (const m of msgs) s.items.push({ k: "skill", msg: m });
+      r.pendingSkills = ev.pending ?? 0;
+      renderSkillsBadge();
+      if (panelId === "skills" && sessionId === state.activeId) refreshPanel();
+      break;
+    }
     case "warn": case "error": if (ev.t === "error") s.lastError = true; note(s, ev.t, ev.msg); break;
     case "approval": r.approvals.push(ev); if (sessionId === state.activeId) showApproval(); break;
     case "turnEnd": r.busy = false; s.updated = Date.now(); if (sessionId !== state.activeId) s.unread = true; break;
     case "usage": r.usage = { contextTokens: ev.contextTokens, costUsd: ev.costUsd, contextWindow: ev.contextWindow }; r.model = ev.model; r.fallback = !!ev.fallback; r.chip = ev.chip; if (ev.sessionId) s.claudeId = ev.sessionId; break;
-    case "closed": r.backend = "off"; if (r.busy || (ev.code && ev.code !== 0)) note(s, "warn", `O backend encerrou${ev.code ? ` (código ${ev.code})` : ""}. Envie outra mensagem para reconectar; a conversa é retomada.`); r.busy = false; for (const t of s.items) { if (t.k === "text") t.open = false; if (t.k === "tool" && !t.done) { t.done = true; t.isError = true; bump(t); } } break;
+    case "closed": r.backend = "off"; if (r.busy || (ev.code && ev.code !== 0)) note(s, "warn", `O backend encerrou${ev.code ? ` (código ${ev.code})` : ""}. Envie outra mensagem para reconectar; a conversa é retomada.`); r.busy = false; for (const t of s.items) { if (t.k === "text" || t.k === "skill") t.open = false; if (t.k === "tool" && !t.done) { t.done = true; t.isError = true; bump(t); } } break;
   }
   persist();
   if (ev.t !== "text" && ev.t !== "thinking") renderSidebar();

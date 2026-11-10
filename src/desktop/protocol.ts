@@ -30,6 +30,7 @@ export type ServerEvent =
   | { t: "info" | "warn" | "error"; msg: string }
   | { t: "approval"; id: string; text: string; force: boolean; kind: string }
   | { t: "usage"; usage: unknown; contextTokens: number; contextWindow?: number; costUsd: number; model: string; sessionId: string; fallback: boolean; chip: string }
+  | { t: "skill"; phase: "reflecting" | "done" | "error"; notes?: string[]; pending?: number }
   | { t: "result"; id: string; data: unknown };
 
 export interface CommandInfo { name: string; description: string; kind: "builtin" | "skill" }
