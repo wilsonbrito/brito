@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.13.0 — 2026-11-10
+
+The desktop app's "who writes the code" selector is clear now, the local Qwen3-4B can be picked, and the Qwen endpoint with a key is set up from inside ⚙ Configure.
+
+### Added
+- **Local Qwen3-4B as the code writer.** The selector next to the model now reads **Escreve o código: Claude (usa tokens)** or **Qwen3-4B (nativo-brito, sem tokens)**. The native option works once `brito slm pull` has run; otherwise the message says why and Claude keeps writing. `/orquestrar modelo slm` does the same in the terminal.
+- **Endpoint setup in ⚙ Configure ("QWEN COM CHAVE").** Fill in name, address, model and key; Brito tests the connection (one token) and only then saves the profile. The "Qwen (com chave)" option only appears in the selector once it is configured. You can swap the key or remove the endpoint from the same card.
+
+### Security
+- The key is typed once, goes straight to the app's main process and is encrypted with the OS vault (DPAPI/Keychain/libsecret). It never enters the UI state (which is written to disk), never goes to `config.json` and is never sent back. Without a vault (e.g. Linux without a keyring) it lives only until the app closes, and the app says so.
+- The address must be `https://`; `http://` is only accepted for localhost and private networks. Credentials inside the URL are refused. The test does not follow redirects.
+- `bash` and the `claude` CLI run without the key; only the server that runs the implementer receives it.
+- A hand-written `qwen` profile in `~/.brito/config.json` is never overwritten or removed by the app.
+- `config.json` is now written atomically (temp file + rename).
+
+### Fixed
+- The "who writes the code" selector now shows what the backend really turned on, instead of staying on an option that was refused.
+
 ## 0.12.0 — 2026-11-10
 
 The desktop app now shows its version and updates itself from inside, with no need to download and reinstall by hand.
