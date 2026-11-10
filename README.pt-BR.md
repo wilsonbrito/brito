@@ -88,6 +88,8 @@ O lint **rejeita** segredos/tokens, caminhos absolutos do usuário, credenciais 
 - **Tool `digest`**: batedor e refinador de textos longos. O modelo local escolhe os blocos mais ligados ao seu objetivo e propõe trechos; o código confere cada citação contra a fonte e descarta o que não existe, e o modelo principal recebe um rascunho pequeno em markdown com citações verificadas e números de página.
 
 - **Fallback quando o Claude acaba**: cadeia Claude → perfil `qwen` → SLM local, com o loop completo do agente e as tools (mesmas permissões). É temporário: passada a janela (o horário de reset que o erro informa, senão 10 min, ou 60 min para cota/auth; `BRITO_FALLBACK_MINUTES` sobrepõe) o próximo turno tenta o Claude de novo. O `/fallback` mostra quando. Um modelo de 4B erra mais com tools: use para continuar, não para tarefas grandes. `BRITO_SLM_FALLBACK=off` tira o SLM da cadeia; `BRITO_SLM_CTX` define o contexto.
+- **Compactação de contexto no SLM local**: ao compactar a conversa, o meio é resumido pelo SLM local (map-reduce em fatias) em vez do Claude, poupando tokens; em qualquer falha volta ao Claude. O `/context` mostra as compactações e os tokens poupados estimados. `BRITO_SLM_COMPACT=off` desliga.
+- **Decisor de destino (modo sombra)**: o SLM local classifica cada pedido como `claude`, `slm` ou `tool` depois do turno e grava ao lado do que o turno realmente exigiu; ainda não muda nada. `/route` (ou `/route all`) mostra quanto ele delegaria e os erros caros. Registros em `~/.brito/routing/`; `BRITO_ROUTE=off` desliga.
 
 `BRITO_SLM=off` desliga; `BRITO_SLM_MODEL` aponta para outro GGUF (URI `hf:` ou caminho de arquivo).
 

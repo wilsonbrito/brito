@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.11.0 — 2026-11-10
+
+Brito now learns which requests the local model could have handled, and compacts long conversations without spending Claude tokens.
+
+### Added
+- **Route decider in shadow mode (`/route`).** After each turn, the local SLM classifies the request as `claude` (reasoning, editing code), `slm` (condense, extract or label a text you gave) or `tool` (a direct lookup or command). Brito logs what it *would* have chosen next to what the turn really needed, inferred from the tools it used (it wrote, planned or delegated → `claude`; only reads and read-only commands → `tool`). **Nothing changes in behaviour yet:** this is to collect real data. `/route` shows how much it would delegate, the "expensive errors" (it would delegate, but the turn edited code), Claude calls that were not needed, and the estimated accuracy; `/route all` covers every repository. Logs stay in `~/.brito/routing/`, outside your repo. `BRITO_ROUTE=off` disables it; it needs `brito slm pull`. The local Qwen3-4B with a closed answer set beat Arch-Router, embedding routing, RouteLLM and Laya on 135 labeled requests (none of the Claude-only requests was sent elsewhere). Feedback with your `/route` numbers is very welcome.
+- **Context compaction on the local SLM.** When a conversation is compacted, the middle is summarized by the local model (chunked map-reduce) instead of Claude; on any failure it falls back to Claude. `/context` shows compactions and estimated tokens saved. `BRITO_SLM_COMPACT=off` disables it. (This shipped in 0.10.0 without release notes.)
+- **Local model usage in the indicators.** The terminal and the desktop app now show how much the local SLM did (calls, tokens, time) next to the Claude tokens.
+- **Skill learning in the desktop app.** The app now reflects after each turn like the terminal does: skill feedback in the chat, `/learn`, and a badge with the number of pending proposals on the Skills button.
+
+### Notes
+- The router only observes. Acting on it (sending requests to the local model, with a verifier and Claude as the safe default) is the next step, and depends on what shadow mode shows.
+
 ## 0.10.1 — 2026-11-09
 
 The desktop file preview now opens PDF, Word and PowerPoint.

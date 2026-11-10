@@ -93,6 +93,7 @@ The lint **rejects** secrets/tokens, absolute user paths, credentials in URLs (`
 
 - **Fallback when Claude runs out**: chain Claude → `qwen` profile → local SLM, with the full agent loop and tools (same permissions). It is temporary: after a window (the reset time reported by the error, else 10 min, or 60 min for quota/auth; `BRITO_FALLBACK_MINUTES` overrides) the next turn tries Claude again. `/fallback` shows when. A 4B model errs more with tools: use it to keep going, not for big tasks. `BRITO_SLM_FALLBACK=off` removes it from the chain; `BRITO_SLM_CTX` sets its context.
 - **Context compaction on the local SLM**: when the conversation is compacted, the middle is summarized by the local SLM (chunked map-reduce) instead of Claude, saving tokens; on any failure it falls back to Claude. `/context` shows compactions and estimated tokens saved. `BRITO_SLM_COMPACT=off` disables it.
+- **Route decider (shadow mode)**: the local SLM classifies each request as `claude`, `slm` or `tool` after the turn and logs it next to what the turn really needed; it changes nothing yet. `/route` (or `/route all`) shows how much it would delegate and its expensive errors. Logs in `~/.brito/routing/`; `BRITO_ROUTE=off` disables it.
 
 `BRITO_SLM=off` disables it; `BRITO_SLM_MODEL` points to another GGUF (`hf:` URI or file path).
 
