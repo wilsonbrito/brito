@@ -15,7 +15,9 @@ const SCHEMA = {
       items: {
         type: "object",
         properties: {
-          name: { type: "string" }, description: { type: "string" }, body: { type: "string" },
+          name: { type: "string", description: "kebab-case" },
+          description: { type: "string", description: "uma frase de 10 a 200 caracteres: QUANDO usar" },
+          body: { type: "string" },
           refs: { type: "array", items: { type: "string" } }, reason: { type: "string" },
           scope: { type: "string", enum: ["project", "global"] },
         },

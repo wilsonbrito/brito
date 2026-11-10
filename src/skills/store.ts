@@ -211,9 +211,22 @@ export function adviseSkill(input: SkillInput): string[] {
   return tips;
 }
 
+export const DESC_MIN = 10;
+export const DESC_MAX = 200;
+
+/** Descrição vinda do modelo de reflexão: colapsa espaços e, se passar do limite, corta na última palavra inteira. */
+export function fitDescription(desc: string): string {
+  const d = desc.replace(/\s+/g, " ").trim();
+  if (d.length <= DESC_MAX) return d;
+  const cut = d.slice(0, DESC_MAX - 1);
+  const sp = cut.lastIndexOf(" ");
+  return `${(sp > DESC_MAX / 2 ? cut.slice(0, sp) : cut).replace(/[\s,;:.]+$/, "")}…`;
+}
+
 export function validate(input: SkillInput) {
   if (!NAME_RE.test(input.name)) throw new Error("name deve ser kebab-case (a-z, 0-9, hífen), 2–49 chars.");
-  if (input.description.length < 10 || input.description.length > 200) throw new Error("description deve ter 10–200 chars e dizer QUANDO usar a skill.");
+  const len = input.description.trim().length;
+  if (len < DESC_MIN || len > DESC_MAX) throw new Error(`description deve ter ${DESC_MIN}–${DESC_MAX} chars e dizer QUANDO usar a skill (veio com ${len}).`);
   if (input.body.trim().length < 40) throw new Error("body curto demais: descreva passos concretos.");
   if (input.body.length > 8000) throw new Error("body acima de 8000 chars: divida em skills menores ou resuma.");
   const { errors } = lintSkill(input);

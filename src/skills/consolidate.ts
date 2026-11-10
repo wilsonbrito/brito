@@ -4,7 +4,7 @@ import { z } from "zod";
 import { toApiTools } from "../tools/registry.js";
 import type { Complete } from "./learn.js";
 import { describeSave } from "./describe.js";
-import { daysSince, deleteSkill, getSkill, listSkills, saveSkill, staleRefs, validate, type Scope, type Skill, type SkillInput } from "./store.js";
+import { daysSince, deleteSkill, fitDescription, getSkill, listSkills, saveSkill, staleRefs, validate, type Scope, type Skill, type SkillInput } from "./store.js";
 
 const STALE_DAYS = 30;
 const MAX_PROPOSALS = 6;
@@ -54,6 +54,7 @@ export async function proposeConsolidation(root: string, model: string, complete
       const p = SaveInput.safeParse(b.input);
       if (!p.success) continue;
       const { scope, ...input } = p.data;
+      input.description = fitDescription(input.description);
       try { validate(input); } catch { continue; }
       out.push({ kind: "save", input, scope });
     } else if (b.name === "skill_delete") {

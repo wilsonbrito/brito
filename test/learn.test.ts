@@ -150,3 +150,12 @@ test("buildReflectInput traz # Sinais e o turno anterior só quando existem", ()
     assert.ok(!sem.includes("# Sinais") && !sem.includes("# Turno anterior"));
   } finally { sb.cleanup(); }
 });
+
+import { fitDescription as fitDesc } from "../src/skills/store.js";
+test("fitDescription corta descrição longa na palavra e respeita 200 chars", () => {
+  const long = "Usar ao diagnosticar falhas de carregamento do addon nativo ".repeat(6);
+  const d = fitDesc(long);
+  assert.ok(d.length <= 200, `len ${d.length}`);
+  assert.ok(d.endsWith("…"));
+  assert.equal(fitDesc("  curta  \n demais ok "), "curta demais ok");
+});
