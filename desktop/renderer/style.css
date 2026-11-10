@@ -58,7 +58,7 @@ main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #topbar { height: 46px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid var(--line); -webkit-app-region: drag; font-weight: 600; }
 #meta { color: var(--mute); font-weight: 400; font-size: 12px; }
 #chat { flex: 1; overflow-y: auto; }
-#messages { max-width: 860px; margin: 0 auto; padding: 22px 24px 40px; }
+#messages { max-width: none; margin: 0; padding: 22px 48px 40px; }
 .empty { text-align: center; color: var(--mute); margin-top: 18vh; }
 .empty h1 { color: var(--accent2); font-size: 28px; margin: 0 0 6px; }
 .user { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin: 18px 0 10px; white-space: pre-wrap; }
@@ -114,7 +114,7 @@ main { position: relative; }
 #panel-head { display: flex; gap: 12px; align-items: center; padding: 10px 18px; border-bottom: 1px solid var(--line); }
 #panel-tabs { font-weight: 600; } #panel-q { margin-left: auto; width: 260px; padding: 6px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); outline: none; }
 #panel-x { color: var(--mute); }
-#panel-body { flex: 1; overflow: auto; padding: 14px 18px; max-width: 980px; width: 100%; margin: 0 auto; }
+#panel-body { flex: 1; overflow: auto; padding: 14px 48px; width: 100%; }
 .card2 { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; }
 .card2 .h { display: flex; gap: 10px; align-items: center; }
 .card2 .h b { font-family: ui-monospace, monospace; font-size: 13px; }
@@ -132,7 +132,7 @@ main { position: relative; }
 .note.warn { color: var(--warn); } .note.error { color: var(--err); }
 .spin::after { content: "…"; animation: pulse 1s infinite; }
 
-footer { flex: none; padding: 0 24px 10px; max-width: 908px; width: 100%; margin: 0 auto; }
+footer { flex: none; padding: 0 48px 12px; width: 100%; }
 #composer { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; }
 #composer:focus-within { border-color: var(--accent); }
 #input { width: 100%; background: none; border: 0; outline: none; resize: none; max-height: 220px; }
@@ -209,7 +209,7 @@ select:hover { background: var(--bg); color: var(--fg); }
 .pmsg { color: var(--mute); padding: 14px 18px; }
 
 /* documento Markdown */
-.doc { max-width: 860px; margin: 0 auto; line-height: 1.65; }
+.doc { max-width: none; margin: 0; line-height: 1.65; }
 .doc h1, .doc h2 { border-bottom: 1px solid var(--line); padding-bottom: 4px; }
 .doc h1 { font-size: 26px; margin: 4px 0 14px; } .doc h2 { font-size: 21px; margin: 26px 0 10px; }
 .doc h3 { font-size: 17px; margin: 20px 0 8px; } .doc h4, .doc h5, .doc h6 { font-size: 14.5px; margin: 16px 0 6px; }
