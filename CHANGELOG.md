@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.2 — 2026-11-10
 
 The desktop app on Apple Silicon no longer fails to start the graph with `ERR_DLOPEN_FAILED`.
 
