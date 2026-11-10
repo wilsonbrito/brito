@@ -340,7 +340,13 @@ function onEvent(sessionId, ev) {
   switch (ev.t) {
     case "hello": if (ev.protocol !== PROTOCOL) note(s, "warn", `App e CLI desalinhados (protocolo ${PROTOCOL} no app, ${ev.protocol} na CLI): rode \`npm run bundle\` ou atualize o app.`); break;
     case "result": { const f = pendingQ.get(ev.id); pendingQ.delete(ev.id); f?.(ev.data); return; }
-    case "ready": r.backend = "on"; r.engine = ev.engine; r.model = ev.model; r.fallback = !!ev.fallback; r.chip = ev.chip; if (s.claudeId !== ev.sessionId) s.claudeId = ev.sessionId; loadModels(sessionId); break;
+    case "ready": r.backend = "on"; r.engine = ev.engine; r.model = ev.model; r.fallback = !!ev.fallback; r.chip = ev.chip; r.endpoint = ev.endpoint ?? null;
+      { // o seletor "Escreve o código" reflete o que o backend realmente ligou (ele pode ter recusado) e mostra o Qwen com chave só se estiver configurado
+        const o = $("orch").querySelector('option[value="endpoint"]');
+        if (o) { o.hidden = o.disabled = !ev.endpointReady; }
+        if (typeof ev.orchMode === "string") { s.settings.orch = ev.orchMode; if (s.id === state.activeId) $("orch").value = ev.orchMode; }
+      }
+      if (s.claudeId !== ev.sessionId) s.claudeId = ev.sessionId; loadModels(sessionId); break;
     case "turnStart": r.busy = true; s.lastError = false; break;
     // os pedaços do mesmo bloco se juntam num item só (streaming); textEnd fecha o bloco
     case "text": { const l = s.items[s.items.length - 1]; if (l?.k === "text" && l.open) { l.text += ev.text; bump(l); } else s.items.push({ k: "text", text: ev.text, open: true }); break; }

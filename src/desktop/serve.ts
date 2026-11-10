@@ -30,10 +30,11 @@ import { indexProject } from "../graph/indexer.js";
 import { initialEffort, initialModel, isEffort, loadProfiles, MODEL_ALIASES, type Effort } from "../model.js";
 import { NO_ANTHROPIC, fallbackStatus, learnerModel, openEngine } from "../engine.js";
 import { engineChip, activateFallback, chooseModel, cliShouldFallBack, fallbackWarning, newFallbackState, renderFallback, retryPrompt, type FallbackState } from "../provider/fallback.js";
-import { contextWindowFor, resolveModel } from "../provider/resolve.js";
+import { ENDPOINT_KEY_ENV, endpointInfo, removeEndpoint, saveEndpoint } from "../endpoint.js";
+import { SLM_MODEL, contextWindowFor, resolveModel } from "../provider/resolve.js";
 import type { Msg } from "../provider/types.js";
 import { PLAN_NOTE, perms, type PermMode } from "../permissions.js";
-import { ORCH_NOTE, implStatus, mainTools, orch, orchGuard, restoreOrch } from "../orchestrator.js";
+import { ORCH_NOTE, implStatus, initialImplModel, mainTools, orch, orchGuard, restoreOrch } from "../orchestrator.js";
 import { getSkill, listBuiltins, listPending, listSkills, skillsIndex } from "../skills/store.js";
 import { defaultComplete, recordOutcomes, reflect, shouldReflect, type Complete } from "../skills/learn.js";
 import { claudeCliComplete } from "../skills/learn-cli.js";
@@ -363,7 +364,10 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
   let busy = false;
   restoreOrch(engine.model, (m) => emit({ t: "warn", msg: m }), (m) => emit({ t: "info", msg: m }));
   const panels = new Panels(root, graphRootFor(root), isHome);
-  const ready =() => emit({ t: "ready", engine: engine.kind, sessionId: engine.sessionId, model: engine.model, effort: engine.effort, mode: perms.mode, orch: orch.on, symbols: syms, notes, root, fallback: engine.fallback.active, chip: chipOf(engine.model, engine.fallback) });
+  // Perfil de endpoint (Qwen com chave): só aparece no seletor depois de configurado.
+  const endpointName = () => { const m = initialImplModel(); return m === SLM_MODEL ? "qwen" : m; };
+  const orchMode = () => (!orch.on ? "" : orch.model === SLM_MODEL ? "slm" : "endpoint");
+  const ready =() => emit({ t: "ready", engine: engine.kind, sessionId: engine.sessionId, model: engine.model, effort: engine.effort, mode: perms.mode, orch: orch.on, orchMode: orchMode(), endpointReady: implStatus(engine.model, endpointName(), process.env).ready, endpoint: endpointInfo(), symbols: syms, notes, root, fallback: engine.fallback.active, chip: chipOf(engine.model, engine.fallback) });
   ready();
 
   const rl = readline.createInterface({ input: process.stdin });
@@ -445,13 +449,26 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
         if (typeof m.model === "string") engine.setModel(m.model ? MODEL_ALIASES[m.model] ?? m.model : ""); // vazio = modelo/perfil salvo
         if (m.effort !== undefined) engine.effort = isEffort(m.effort) ? m.effort : "";
         if (["manual", "auto", "plan", "bypass"].includes(m.mode)) perms.mode = m.mode as PermMode;
-        // "on" liga o modo orquestrador (se o implementador estiver pronto); "" desliga.
+        // "" desliga; "slm" = Qwen3-4B nativo escreve o código; "endpoint" (ou "on", antigo) = perfil com chave.
         if (m.orch === "") orch.on = false;
-        else if (m.orch === "on") {
-          const s = implStatus(engine.model, orch.model, process.env);
-          if (s.ready) orch.on = true;
-          else sink.warn(`modo orquestrador não ligou: ${s.reason}`);
+        else if (m.orch === "slm" || m.orch === "endpoint" || m.orch === "on") {
+          const impl = m.orch === "slm" ? SLM_MODEL : endpointName();
+          const s = implStatus(engine.model, impl, process.env);
+          if (s.ready) { orch.model = impl; orch.on = true; }
+          else {
+            orch.on = false;
+            sink.warn(`Não deu para usar ${m.orch === "slm" ? "o Qwen3-4B nativo" : "o Qwen com chave"} para escrever código: ${s.reason}. Quem escreve o código continua sendo o Claude (usa tokens).`);
+          }
         }
+        ready();
+        break;
+      }
+      // Endpoint próprio (Qwen com chave). A chave chega pelo stdin, vem do processo principal do app e nunca é emitida de volta.
+      case "endpoint": {
+        if (m.op === "key") { if (typeof m.key === "string" && m.key.trim()) process.env[ENDPOINT_KEY_ENV] = m.key.trim(); ready(); break; }
+        const r = m.op === "remove" ? removeEndpoint() : m.op === "save" ? await saveEndpoint({ baseURL: String(m.baseURL ?? ""), model: String(m.model ?? ""), label: String(m.label ?? ""), key: String(m.key ?? "") }) : { ok: false, msg: "operação desconhecida" };
+        if (m.op === "remove") orchGuard(engine.model, (w) => sink.warn(w));
+        emit({ t: "endpointResult", ok: r.ok, msg: r.msg });
         ready();
         break;
       }

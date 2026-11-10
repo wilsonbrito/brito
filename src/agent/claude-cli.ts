@@ -8,6 +8,7 @@ import { MCP_NAME, MCP_PREFIX, APPROVE_TOOL } from "../mcp/server.js";
 import { ui as terminalUi } from "../ui/ui.js";
 import type { TurnSink } from "./sink.js";
 import { MODE_ENV, perms, type PermMode } from "../permissions.js";
+import { scrubbedEnv } from "../endpoint.js";
 import { CLAUDE_EDIT_TOOLS, ORCH_MCP_TIMEOUT, ORCH_NOTE, ORCH_NOTE_CLAUDE, orch, orchEnv } from "../orchestrator.js";
 import { DEFAULT_MODEL, wireEffort } from "../model.js";
 import { subagentModel } from "../engine.js";
@@ -269,7 +270,7 @@ export class ClaudeSession {
       const child = (this.child = spawn(cmd.command, cmd.args, {
         cwd: this.o.root, stdio: ["ignore", "pipe", "pipe"],
         // `/reasoning none`: o claude desliga o raciocínio com MAX_THINKING_TOKENS=0 (não há `--effort none`)
-        env: { ...process.env, ...this.o.env, BRITO_DEPTH: String(Number(process.env.BRITO_DEPTH ?? 0) + 1),
+        env: { ...scrubbedEnv(), ...this.o.env, BRITO_DEPTH: String(Number(process.env.BRITO_DEPTH ?? 0) + 1),
           ...(orch.on && !process.env.MCP_TOOL_TIMEOUT ? { MCP_TOOL_TIMEOUT: ORCH_MCP_TIMEOUT } : {}), ...(wireEffort(this.effort).thinking ? {} : { MAX_THINKING_TOKENS: "0" }) },
       }));
       let buf = "", stderr = "", ok = true, interrupted = false;

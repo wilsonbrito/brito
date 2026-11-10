@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
 import { spawn, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -49,6 +49,19 @@ function backendRuntime() {
 const backends = new Map(); // sessionId → { child, ready: Promise }
 let win;
 
+// Chave do endpoint próprio (Qwen): nunca passa pelo estado da interface nem vai para texto puro. Fica cifrada pelo cofre
+// do sistema (DPAPI/Keychain/libsecret); sem cofre (ex.: Linux sem keyring) vale só até fechar o app.
+const keyPath = path.join(path.dirname(storePath), "endpoint.key");
+const KEY_ENV = "BRITO_ENDPOINT_KEY";
+let memKey = null;
+const vaultOk = () => { try { return safeStorage.isEncryptionAvailable() && safeStorage.getSelectedStorageBackend?.() !== "basic_text"; } catch { return false; } };
+function loadKey() {
+  if (memKey) return memKey;
+  try { if (vaultOk()) memKey = safeStorage.decryptString(fs.readFileSync(keyPath)); } catch { /* sem chave salva ou cofre mudou */ }
+  return memKey;
+}
+const endpointWaiters = new Map(); // sessionId → resolve do próximo endpointResult
+
 const send = (sessionId, ev) => win?.webContents.send("brito:event", { sessionId, ev });
 
 function startBackend(sessionId, root, claudeId) {
@@ -57,7 +70,8 @@ function startBackend(sessionId, root, claudeId) {
   if (!cliPath) return Promise.reject(new Error("dist/cli.bundle.mjs não encontrado: rode `npm run bundle` na raiz do projeto."));
   const args = [cliPath, "gui-serve", "-d", root, ...(claudeId ? ["--resume", claudeId] : [])];
   const rt = backendRuntime();
-  const child = spawn(rt.bin, args, { cwd: root, env: { ...process.env, ...rt.env }, stdio: ["pipe", "pipe", "pipe"] });
+  const key = loadKey();
+  const child = spawn(rt.bin, args, { cwd: root, env: { ...process.env, ...rt.env, ...(key ? { [KEY_ENV]: key } : {}) }, stdio: ["pipe", "pipe", "pipe"] });
   let resolveReady, rejectReady, isReady = false;
   const ready = new Promise((res, rej) => { resolveReady = res; rejectReady = rej; });
   let buf = "", err = "";
@@ -69,6 +83,7 @@ function startBackend(sessionId, root, claudeId) {
       if (!line.startsWith("@@")) continue;
       try {
         const ev = JSON.parse(line.slice(2));
+        if (ev.t === "endpointResult") { endpointWaiters.get(sessionId)?.(ev); endpointWaiters.delete(sessionId); continue; }
         if (ev.t === "ready" && !isReady) { isReady = true; resolveReady(ev); }
         send(sessionId, ev);
       } catch { /* linha truncada */ }
@@ -120,6 +135,29 @@ ipcMain.handle("backend:start", async (_e, { sessionId, root, claudeId }) => {
 });
 ipcMain.on("backend:write", (_e, { sessionId, msg }) => write(sessionId, msg));
 ipcMain.on("backend:stop", (_e, sessionId) => { write(sessionId, { t: "quit" }); });
+// Endpoint próprio: o backend valida, testa e grava o perfil (sem chave); aqui a chave é guardada cifrada.
+const endpointCall = (sessionId, msg) => new Promise((resolve) => {
+  if (!backends.has(sessionId)) return resolve({ ok: false, msg: "sessão sem backend ativo" });
+  endpointWaiters.set(sessionId, resolve);
+  write(sessionId, { t: "endpoint", ...msg });
+  setTimeout(() => { if (endpointWaiters.get(sessionId) === resolve) { endpointWaiters.delete(sessionId); resolve({ ok: false, msg: "o teste demorou demais" }); } }, 30000);
+});
+ipcMain.handle("endpoint:save", async (_e, { sessionId, baseURL, model, label, key }) => {
+  if (![sessionId, baseURL, model, key].every((v) => typeof v === "string" && v.trim())) return { ok: false, msg: "preencha endereço, modelo e chave" };
+  const r = await endpointCall(sessionId, { op: "save", baseURL, model, label: typeof label === "string" ? label : "", key });
+  if (!r.ok) return { ok: false, msg: r.msg };
+  memKey = key.trim();
+  let persisted = false;
+  if (vaultOk()) { try { fs.mkdirSync(path.dirname(keyPath), { recursive: true }); fs.writeFileSync(keyPath, safeStorage.encryptString(memKey), { mode: 0o600 }); persisted = true; } catch { /* fica só em memória */ } }
+  if (!persisted) fs.rmSync(keyPath, { force: true });
+  for (const id of backends.keys()) if (id !== sessionId) write(id, { t: "endpoint", op: "key", key: memKey });
+  return { ok: true, msg: r.msg, persisted };
+});
+ipcMain.handle("endpoint:remove", async (_e, { sessionId }) => {
+  memKey = null; fs.rmSync(keyPath, { force: true });
+  for (const id of backends.keys()) if (id !== sessionId) write(id, { t: "endpoint", op: "remove" });
+  return endpointCall(sessionId, { op: "remove" });
+});
 ipcMain.handle("env", () => ({ home: os.homedir(), platform: process.platform, cli: !!cliPath, version: appVersion() }));
 
 // Atualização: consulta a última Release, baixa o instalador do SO e o aplica (Windows) ou o entrega ao usuário (macOS/Linux).

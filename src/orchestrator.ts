@@ -1,7 +1,9 @@
 import { allTools } from "./tools/registry.js";
 import { loadProfiles, loadSavedImplModel, loadSavedOrch } from "./model.js";
 import { missingKeyMessage } from "./provider/openai-compat.js";
-import { resolveModel } from "./provider/resolve.js";
+import { resolveModel, SLM_MODEL } from "./provider/resolve.js";
+import { slmReadySync } from "./local/slm.js";
+import { ENDPOINT_KEY_ENV } from "./endpoint.js";
 import type { AgentDef } from "./agent/agents.js";
 
 // Modo orquestrador: o modelo principal (Claude) planeja e revisa; um perfil de endpoint (o qwen) implementa cada task
@@ -43,6 +45,8 @@ export function implStatus(main: string, impl: string, env: NodeJS.ProcessEnv): 
     return { ready: false, reason: `o perfil "${name}" em ~/.brito/config.json está inválido (${why})` };
   }
   const p = profiles[name];
+  // SLM nativo do Brito (Qwen3-4B): roda na máquina, não tem chave; basta estar baixado.
+  if (!p && name === SLM_MODEL) return slmReadySync() ? { ready: true, label: "Qwen3-4B (nativo)" } : { ready: false, reason: "o SLM nativo não está pronto: rode `brito slm pull`" };
   if (!p || resolveModel(name).kind !== "openai") return { ready: false, reason: `sem perfil "${name}" em providers no ~/.brito/config.json` };
   if (!env[p.apiKeyEnv]?.trim()) return { ready: false, reason: missingKeyMessage(p) };
   return { ready: true, label: p.label };
@@ -76,7 +80,12 @@ export function restoreOrch(main: string, warn: (msg: string) => void, info: (ms
 export const ORCH_ENV = "BRITO_ORCH";
 
 /** Env do servidor MCP: liga a tool `implement` lá e diz qual perfil implementa. */
-export const orchEnv = (): Record<string, string> => (orch.on ? { [ORCH_ENV]: "1", BRITO_IMPL_MODEL: orch.model } : {});
+export const orchEnv = (): Record<string, string> => {
+  if (!orch.on) return {};
+  // a chave do endpoint vai só ao servidor MCP (que roda o implementador), não ao ambiente do claude e dos comandos dele
+  const key = process.env[ENDPOINT_KEY_ENV];
+  return { [ORCH_ENV]: "1", BRITO_IMPL_MODEL: orch.model, ...(key ? { [ENDPOINT_KEY_ENV]: key } : {}) };
+};
 
 /** Uma task do implementador leva minutos: o timeout padrão do claude CLI para tools MCP cortaria no meio (30 min). */
 export const ORCH_MCP_TIMEOUT = "1800000";

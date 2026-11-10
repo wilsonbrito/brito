@@ -175,6 +175,41 @@ async function versionView() {
   return out;
 }
 
+// Endpoint próprio (Qwen com chave). A chave só é digitada aqui, vai direto ao processo principal e o campo é limpo: ela
+// nunca entra no estado da interface (que é gravado em disco) nem volta do backend.
+function endpointView(s) {
+  const out = [txt("div", "sec2", "QWEN COM CHAVE (SEU SERVIDOR) · OPCIONAL")];
+  const c = el("div", "card2");
+  const cur = runtime(s.id).endpoint;
+  const msg = txt("div", "sub2", "");
+  if (cur) {
+    c.append(txt("div", "", `✓ ${cur.label} · ${cur.host}`),
+      txt("div", "sub2", "A chave está guardada cifrada pelo sistema. Já dá para escolher este Qwen em “Escreve o código”."));
+    const rm = btn("Remover", async (e) => {
+      if (!confirm("Remover o endpoint e a chave guardada?")) return;
+      e.target.disabled = true; const r = await window.brito.endpoint.remove(s.id);
+      note(s, r.ok ? "info" : "error", r.msg); renderMessages(); refreshPanel();
+    });
+    c.append(rm);
+  } else {
+    c.append(txt("div", "sub2", "Para o Qwen escrever código num servidor seu (compatível com a API da OpenAI). Sem isso, use o Claude ou o Qwen3-4B nativo."));
+  }
+  const field = (label, ph, type = "text") => { const i = el("input"); i.type = type; i.placeholder = ph; i.autocomplete = "off"; i.spellcheck = false; i.style.cssText = "width:100%;margin-top:6px;box-sizing:border-box"; i.setAttribute("aria-label", label); return i; };
+  const name = field("Nome", "Nome (ex.: Qwen Oracle)"), url = field("Endereço", "Endereço (ex.: https://servidor/v1)"), model = field("Modelo", "Nome do modelo no servidor"), key = field("Chave", cur ? "Nova chave (para trocar)" : "Chave (token)", "password");
+  const save = btn(cur ? "Testar e trocar" : "Testar e salvar", async (e) => {
+    const b = e.target; b.disabled = true; b.textContent = "Testando…"; msg.textContent = "";
+    const r = await window.brito.endpoint.save(s.id, { label: name.value, baseURL: url.value, model: model.value, key: key.value });
+    key.value = ""; // a chave não fica na tela nem na memória da interface
+    b.disabled = false; b.textContent = cur ? "Testar e trocar" : "Testar e salvar";
+    if (!r.ok) { msg.textContent = "✗ " + r.msg; return; }
+    note(s, "info", `Endpoint configurado: ${r.msg}${r.persisted ? "" : " (sem cofre do sistema: a chave vale só até fechar o app)"}`);
+    renderMessages(); refreshPanel();
+  });
+  c.append(name, url, model, key, msg, save);
+  out.push(c);
+  return out;
+}
+
 async function settingsView(s) {
   const d = await query(s.id, "usage", "force", 12000);
   if (!d || !d.plan) return [txt("div", "pmsg", "Sem resposta do backend (atualize o app e a CLI para a mesma versão).")];
@@ -197,7 +232,7 @@ async function settingsView(s) {
   if (l) lc.append(txt("div", "", `${l.calls} chamadas  · ↑${fmtTok(l.tokensIn)}  ↓${fmtTok(l.tokensOut)} (estimado)`),
     txt("div", "sub2", `${(l.ms / 1000).toFixed(1)}s de processamento${l.tokensSaved ? ` · ~${fmtTok(l.tokensSaved)} tokens poupados do Claude na compactação` : ""}`));
   else lc.append(txt("div", "sub2", "Não usado nesta sessão."));
-  out.push(lc, btn("Atualizar", refreshPanel));
+  out.push(lc, ...endpointView(s), btn("Atualizar", refreshPanel));
   return out;
 }
 

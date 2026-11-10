@@ -47,9 +47,10 @@
               <option value="sonnet">Sonnet</option>
               <option value="haiku">Haiku</option>
             </select>
-            <select id="orch" title="Quem escreve o código. O modelo escolhido planeja e revisa; com Qwen, ele escreve o código no seu endpoint (poupa tokens do Claude)">
-              <option value="">Código: o próprio modelo (usa tokens)</option>
-              <option value="on">Código: Qwen (poupa tokens)</option>
+            <select id="orch" title="Quem escreve o código. O modelo escolhido sempre planeja e revisa. Com o Qwen3-4B nativo, ele escreve o código na sua máquina, sem gastar tokens (precisa ter rodado brito slm pull).">
+              <option value="">Escreve o código: Claude (usa tokens)</option>
+              <option value="slm">Escreve o código: Qwen3-4B (nativo-brito, sem tokens)</option>
+              <option value="endpoint" hidden disabled>Escreve o código: Qwen (com chave, poupa tokens)</option>
             </select>
             <select id="effort" title="Esforço de raciocínio">
               <option value="">Auto</option>

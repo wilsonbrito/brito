@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { OpenAIProfile } from "./provider/types.js";
@@ -32,13 +32,22 @@ export function loadSavedModel(): string | undefined {
   } catch { return undefined; }
 }
 
-/** Grava `patch` no config global preservando as demais chaves. */
-function saveConfig(patch: Record<string, unknown>): void {
-  let cfg: Record<string, unknown> = {};
+/**
+ * Altera o config global preservando as demais chaves. Grava num arquivo temporário e renomeia: uma queda no meio da
+ * escrita não deixa o config pela metade (ele guarda também modelo, esforço e perfis).
+ */
+export function updateConfig(mutate: (cfg: Record<string, any>) => void): void {
+  let cfg: Record<string, any> = {};
   try { cfg = JSON.parse(readFileSync(configPath(), "utf8")) ?? {}; } catch { /* config novo ou ilegível */ }
+  mutate(cfg);
   mkdirSync(dirname(configPath()), { recursive: true });
-  writeFileSync(configPath(), JSON.stringify({ ...cfg, ...patch }, null, 2) + "\n");
+  const tmp = `${configPath()}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n");
+  renameSync(tmp, configPath());
 }
+
+/** Grava `patch` no config global preservando as demais chaves. */
+const saveConfig = (patch: Record<string, unknown>): void => updateConfig((cfg) => Object.assign(cfg, patch));
 
 export const saveModel = (model: string) => saveConfig({ model });
 
