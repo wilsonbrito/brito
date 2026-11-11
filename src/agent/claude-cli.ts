@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -20,6 +22,30 @@ import { classifyClaudeCliFailure, collectClaudeFailure, shortError, type Claude
 
 // Backend alternativo: delega ao `claude` oficial, que autentica com o /login do usuário.
 // O brito nunca lê nem envia o token da assinatura. Grafo, memória e skills chegam ao claude via MCP.
+
+/** Limite seguro para a linha de comando: o Windows corta em ~32.767 caracteres (spawn ENAMETOOLONG). */
+const ARGV_BUDGET = 24_000;
+
+/**
+ * Um CLAUDE.md/AGENTS.md grande estoura a linha de comando no Windows. Quando o total passa do limite, o system prompt, o
+ * --mcp-config e o --agents vão para arquivos temporários (o claude aceita caminho nos três); `cleanup` apaga a pasta.
+ */
+export function spillLongArgs(args: string[]): { args: string[]; cleanup: () => void } {
+  if (args.reduce((n, a) => n + a.length + 1, 0) <= ARGV_BUDGET) return { args, cleanup: () => {} };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brito-claude-"));
+  const out = [...args];
+  const spill = (flag: string, newFlag: string, file: string) => {
+    const i = out.indexOf(flag);
+    if (i < 0 || i + 1 >= out.length) return;
+    const f = path.join(dir, file);
+    fs.writeFileSync(f, out[i + 1], { mode: 0o600 });
+    out.splice(i, 2, newFlag, f);
+  };
+  spill("--append-system-prompt", "--append-system-prompt-file", "system.md");
+  spill("--mcp-config", "--mcp-config", "mcp.json");
+  spill("--agents", "--agents", "agents.json");
+  return { args: out, cleanup: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp */ } } };
+}
 
 export function hasClaudeCli(): boolean {
   const c = claudeCommand(["--version"]);
@@ -266,7 +292,8 @@ export class ClaudeSession {
       if (imgs.length) ui.info(`📎 ${imgs.map((i) => `${i.name} (${fmtBytes(i.bytes)})`).join(", ")} anexado${imgs.length > 1 ? "s" : ""}`);
       // O claude vê a imagem pela tool Read: o prompt diz quais arquivos são imagens anexadas pelo usuário.
       const prompt = this.pendingHandoff + (imgs.length ? `${text}\n\n[O usuário anexou ${imgs.length > 1 ? "estes arquivos" : "este arquivo"}; abra com a tool Read para vê-${imgs.length > 1 ? "las" : "la"}:\n${imgs.map((i) => `- ${i.path}`).join("\n")}]` : text);
-      const cmd = (this.o.command ?? claudeCommand)(this.args(prompt, [...new Set(imgs.map((i) => path.dirname(i.path)))]));
+      const spilled = spillLongArgs(this.args(prompt, [...new Set(imgs.map((i) => path.dirname(i.path)))]));
+      const cmd = (this.o.command ?? claudeCommand)(spilled.args);
       const child = (this.child = spawn(cmd.command, cmd.args, {
         cwd: this.o.root, stdio: ["ignore", "pipe", "pipe"],
         // `/reasoning none`: o claude desliga o raciocínio com MAX_THINKING_TOKENS=0 (não há `--effort none`)
@@ -328,8 +355,9 @@ export class ClaudeSession {
         }
       });
       child.stderr!.on("data", (d: Buffer) => { stderr += d.toString(); });
-      child.on("error", (e) => { ok = false; failure.spawnError = e.message; ui.error(`não consegui executar o claude: ${e.message}`); });
+      child.on("error", (e) => { spilled.cleanup(); ok = false; failure.spawnError = e.message; ui.error(`não consegui executar o claude: ${e.message}`); });
       child.on("close", (code, signal) => {
+        spilled.cleanup();
         this.child = null;
         interrupted = signal === "SIGINT" || code === 130 || this.aborted;
         this.aborted = false;

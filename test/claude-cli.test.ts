@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
-import { ClaudeSession, handoffNote, historyForFallback, ORPHAN_RESULT, recordStreamEvent, turnsToMessages } from "../src/agent/claude-cli.js";
+import { ClaudeSession, handoffNote, historyForFallback, ORPHAN_RESULT, recordStreamEvent, spillLongArgs, turnsToMessages } from "../src/agent/claude-cli.js";
 import type { TurnSink } from "../src/agent/sink.js";
 import { MCP_PREFIX } from "../src/mcp/server.js";
 import { renderTranscript, shouldReflect } from "../src/skills/learn.js";
@@ -302,4 +303,21 @@ test("handoff: o próximo prompt do claude leva o que foi feito no qwen, uma vez
     await s.send("de novo");
     assert.equal(prompts[2], "de novo");
   } finally { sb.cleanup(); }
+});
+
+test("spillLongArgs: prompt grande vai por arquivo (evita ENAMETOOLONG no Windows); curto fica inline", () => {
+  const small = ["-p", "oi", "--append-system-prompt", "curto", "--mcp-config", "{}", "--agents", "{}"];
+  const same = spillLongArgs(small);
+  assert.deepEqual(same.args, small);
+  const big = "x".repeat(40_000);
+  const r = spillLongArgs(["-p", "oi", "--append-system-prompt", big, "--mcp-config", '{"a":1}', "--agents", "{}", "--model", "m"]);
+  try {
+    assert.ok(r.args.join(" ").length < 1000);
+    const f = r.args[r.args.indexOf("--append-system-prompt-file") + 1];
+    assert.equal(fs.readFileSync(f, "utf8"), big);
+    assert.equal(fs.readFileSync(r.args[r.args.indexOf("--mcp-config") + 1], "utf8"), '{"a":1}');
+    assert.equal(r.args[r.args.indexOf("--model") + 1], "m");
+    r.cleanup();
+    assert.equal(fs.existsSync(f), false);
+  } finally { r.cleanup(); }
 });
