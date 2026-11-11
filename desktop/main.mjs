@@ -95,7 +95,7 @@ function startBackend(sessionId, root, claudeId) {
     backends.delete(sessionId);
     // o fim do stderr tem a mensagem do erro; o começo, no Node do Electron, é só o fonte minificado do node_init
     if (!isReady) rejectReady(new Error(err.trim().slice(-500) || `backend saiu (${code})`));
-    send(sessionId, { t: "closed", code });
+    send(sessionId, { t: "closed", code, ...(code ? { stderr: err.trim().slice(-600) } : {}) });
   });
   backends.set(sessionId, { child, ready });
   return ready;
