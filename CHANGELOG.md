@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.3 — 2026-11-11
+
+On Windows the `claude` backend no longer dies with "O backend encerrou (código 1)" when the project has a large `CLAUDE.md` or `AGENTS.md`.
+
+### Fixed
+- **`spawn ENAMETOOLONG` with a big `CLAUDE.md`/`AGENTS.md` (#27).** The system prompt, which embeds the whole project instructions file, travelled on the command line together with `--mcp-config` and `--agents`. A ~29 KB file went over the Windows limit (~32,767 characters) and the backend exited with code 1. Above 24,000 characters those three values now go through temporary files (deleted when the turn ends); below that nothing changes.
+- **The desktop app hid why the backend closed.** The "O backend encerrou" notice now shows the end of the backend's error output, so the cause is visible instead of only the exit code.
+
 ## 0.13.2 — 2026-11-10
 
 The desktop app on Apple Silicon no longer fails to start the graph with `ERR_DLOPEN_FAILED`.
