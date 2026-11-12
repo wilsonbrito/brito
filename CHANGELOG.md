@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Markdown (`.md`) in the graph.** Note vaults without code now get a graph of relations: headings become `heading` symbols, frontmatter (`status: open`) and `#tags` become `tag` symbols (`status:open`), `#123` mentions become `ref` symbols, and `[text](./b.md)` links, `[[wikilinks]]`, frontmatter values that name another note (`pessoas: [ana]`) and numeric ids (`pendencias: [14]` → the note with `id: 14` in `pendencias/`) become file→file edges. Empty frontmatter values (`null`) and dates are ignored. Existing projects re-index once (indexer v6; 318 notes ≈ 36 s, then incremental).
+- **Three tools for note vaults, no Cypher needed.** `graph_notes_find` (filter by folder, frontmatter field, date/number ranges, links, `#N` mentions; `pick` lists a field's values), `graph_notes_backlinks` (who links to a note, plus `#id` mentions) and `graph_notes_path` (follows relations between notes in one call, e.g. calls of October → open tasks they cover → owners; called with `{}` it lists the vault's relations and fields).
+
+### Measured
+Real vault (318 notes), 49 questions x 2 runs, Claude Sonnet, answers scored against a script-computed ground truth (F1). Without the graph the agent uses grep and scripts. 16 of the 49 questions were written after the tools.
+
+| | no graph | notes tools (find, backlinks) | all notes tools (+ path) |
+|---|---|---|---|
+| mean F1 | 0.98 | 0.99 | 0.99 |
+| net tokens per question | 94k | 74k (-21%) | 68k (-28%) |
+| cost | $5.12 | $3.43 (-33%) | $2.67 (-48%) |
+
+Biggest gains: multi-hop questions (176k -> 92k tokens), questions written after the tools (134k -> 99k, F1 0.96 -> 0.99) and date/filter questions (about -50%). Content search (finding a word in the body) and implicit mentions tie or lose: use grep there. Known weak spot: chained "who cites X" questions that depend on body text (one question scored F1 0.71 against 0.96 without the graph). Single vault, single model, 2 runs: strong evidence of direction, not a guarantee. The agent only uses the graph with ready-made tools (65-90% of runs); with raw Cypher it used it in 8%.
+
+Unknown keys in `graph_notes_find` / `graph_notes_path` now return an error instead of being ignored: a silently dropped filter returned wrong answers that looked right.
+
 ## 0.13.3 — 2026-11-11
 
 On Windows the `claude` backend no longer dies with "O backend encerrou (código 1)" when the project has a large `CLAUDE.md` or `AGENTS.md`.

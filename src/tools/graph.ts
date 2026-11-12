@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import { defineTool } from "./registry.js";
 import { indexProject } from "../graph/indexer.js";
 import { listSkills } from "../skills/store.js";
+import "./graph-notes.js";
+import "./graph-notes-path.js";
 
 const fmt = (rows: any[], cols: string[]) => (rows.length ? rows.map((r) => cols.map((c) => r[c]).join("  ")).join("\n") : "(vazio)");
 
