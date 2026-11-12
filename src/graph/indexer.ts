@@ -8,16 +8,18 @@ import { spawnSync } from "node:child_process";
 import { GraphStore } from "./store.js";
 import { SFC_EXT, componentName, splitSfc, templateCalleeNames } from "./sfc.js";
 import { Aliases, aliasCandidates } from "./aliases.js";
+import { IDREF_PREFIX, IdIndex, MD_EXT, WIKI_PREFIX, WikiIndex, extractMarkdown } from "./markdown.js";
 import { EXTRA_EXT, ProjectIndex, extractLang, isExtraLang, type Binding, type Call, type ExtraLang, type Sym } from "./langs.js";
 
 const require = createRequire(import.meta.url);
 const WASM_DIR = path.dirname(require.resolve("tree-sitter-wasms/package.json")) + "/out";
 
-type Lang = "typescript" | "tsx" | "javascript" | "python" | ExtraLang;
+type Lang = "typescript" | "tsx" | "javascript" | "python" | "markdown" | ExtraLang;
 const EXT: Record<string, Lang> = {
   ".ts": "typescript", ".mts": "typescript", ".cts": "typescript",
   ".tsx": "tsx", ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
   ".py": "python",
+  ".md": "markdown", ".markdown": "markdown",
   ...EXTRA_EXT,
 };
 /** Tudo que o grafo indexa: código em EXT e os scripts de componentes (.svelte/.vue/.astro). Usado também nas instruções do MCP. */
@@ -173,7 +175,7 @@ function resolveImport(from: string, spec: string, known: Set<string>, aliases?:
   return null;
 }
 
-const INDEXER_VERSION = "v4";
+const INDEXER_VERSION = "v7";
 const TYPE_KINDS = new Set(["class", "interface", "struct", "trait", "enum", "module", "type"]);
 const JS_LIKE_RE = /\.(m|c)?[jt]sx?$|\.py$|\.svelte$|\.vue$|\.astro$/;
 const SEP = "\t";
@@ -306,9 +308,14 @@ async function indexProjectLocked(root: string, store: GraphStore, opts: IndexOp
     // Componente (.svelte/.vue/.astro): o parser vê só os blocos de script; o template vira chamadas de um símbolo próprio.
     const sfc = SFC_EXT.has(ext) ? splitSfc(src, ext) : null;
     const lang: Lang = sfc ? (sfc.tsx ? "tsx" : "typescript") : EXT[ext];
-    const tree = (await getParser(lang)).parse(sfc ? sfc.script : src);
-    const info = isExtraLang(lang) ? extractLang(tree.rootNode, lang, rel) : extract(tree.rootNode, lang, rel);
-    tree.delete();
+    let info: { syms: Sym[]; calls: Call[]; imports: string[]; bindings: Binding[] };
+    if (MD_EXT.has(ext.toLowerCase())) { // markdown: sem parser, só estrutura e links
+      info = { ...extractMarkdown(src, rel), calls: [], bindings: [] };
+    } else {
+      const tree = (await getParser(lang)).parse(sfc ? sfc.script : src);
+      info = isExtraLang(lang) ? extractLang(tree.rootNode, lang, rel) : extract(tree.rootNode, lang, rel);
+      tree.delete();
+    }
     if (sfc) {
       const name = componentName(rel);
       const comp: Sym = { id: `${rel}::${name}:1`, name, kind: "component", file: rel, startLine: 1, endLine: src.split("\n").length };
@@ -319,9 +326,8 @@ async function indexProjectLocked(root: string, store: GraphStore, opts: IndexOp
     const calls = [...new Set(info.calls.filter((c) => c.callerId).map((c) => [c.callerId, c.callee, c.obj].join(SEP)))];
     const bindings = [...new Set(info.bindings.map((b) => b.join(SEP)))];
     await store.run("CREATE (:File {path:$p, lang:$l, hash:$h, calls:$c, imports:$i, bindings:$b})", { p: rel, l: sfc ? ext.slice(1) : lang, h: hash, c: calls, i: [...new Set(info.imports)], b: bindings });
-    for (const s of info.syms) {
-      await store.run("CREATE (:Symbol {id:$id, name:$n, kind:$k, file:$f, startLine:$s, endLine:$e})", { id: s.id, n: s.name, k: s.kind, f: s.file, s: s.startLine, e: s.endLine });
-      await store.run("MATCH (f:File {path:$f}), (s:Symbol {id:$id}) CREATE (f)-[:DEFINES]->(s)", { f: rel, id: s.id });
+    for (const s of info.syms) { // símbolo e DEFINES numa query só: metade das idas ao banco
+      await store.run("MATCH (f:File {path:$f}) CREATE (f)-[:DEFINES]->(:Symbol {id:$id, name:$n, kind:$k, file:$f, startLine:$s, endLine:$e})", { id: s.id, n: s.name, k: s.kind, f: s.file, s: s.startLine, e: s.endLine });
     }
     stored.set(rel, { hash, calls, imports: [...new Set(info.imports)], bindings });
     await store.yieldIfWaited(); // dá a vez a outra sessão que só quer consultar
@@ -330,8 +336,12 @@ async function indexProjectLocked(root: string, store: GraphStore, opts: IndexOp
   // 3. Recalcula arestas desejadas em memória (sem parsear) e aplica diff.
   const known = new Set(stored.keys());
   const projectIndex = new ProjectIndex(root, known);
+  const wikiIndex = new WikiIndex(known);
+  const idIndex = new IdIndex((await store.run("MATCH (s:Symbol) WHERE s.kind = 'tag' AND s.name STARTS WITH 'id:' RETURN s.file AS file, s.name AS name")).map((r) => ({ file: String(r.file), name: String(r.name) })));
   /** Arquivos que um import pode designar: vários em linguagens de pacote (Go, Java/Kotlin com wildcard), no máximo um em TS/Python. */
   const resolveAll = (from: string, spec: string): string[] => {
+    if (spec.startsWith(WIKI_PREFIX)) return wikiIndex.resolve(spec);
+    if (spec.startsWith(IDREF_PREFIX)) return idIndex.resolve(spec);
     const r = projectIndex.resolve(from, spec);
     if (r) return r;
     const one = resolveImport(from, spec, known, aliases);
