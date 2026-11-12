@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.14.0 — 2026-11-12
+
+Note vaults (`.md` without code) now get a real graph and three ready-made tools. On a 318-note vault they cut ~28% of tokens and ~48% of cost at equal accuracy.
 
 ### Added
 - **Markdown (`.md`) in the graph.** Note vaults without code now get a graph of relations: headings become `heading` symbols, frontmatter (`status: open`) and `#tags` become `tag` symbols (`status:open`), `#123` mentions become `ref` symbols, and `[text](./b.md)` links, `[[wikilinks]]`, frontmatter values that name another note (`pessoas: [ana]`) and numeric ids (`pendencias: [14]` → the note with `id: 14` in `pendencias/`) become file→file edges. Empty frontmatter values (`null`) and dates are ignored. Existing projects re-index once (indexer v6; 318 notes ≈ 36 s, then incremental).
