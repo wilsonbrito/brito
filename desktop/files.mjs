@@ -73,3 +73,35 @@ export function readPreview(root, rel) {
   if (buf.subarray(0, 8000).includes(0)) return { ...base, kind: "binary" };
   return { ...base, kind: "text", text: buf.toString("utf8") };
 }
+
+export const MAX_PASTED = 25 * 1024 * 1024;
+const PASTE_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/bmp": "bmp", "application/pdf": "pdf", "text/plain": "txt" };
+const two = (n) => String(n).padStart(2, "0");
+
+/**
+ * Salva um arquivo colado (captura de tela, imagem copiada do navegador) numa pasta temporária e devolve o caminho,
+ * para o agente lê-lo como um arquivo arrastado. O nome é saneado (sem pastas) e arquivos com mais de 7 dias somem.
+ */
+export function savePasted(dir, name, mime, data, now = new Date()) {
+  const bytes = Buffer.from(data);
+  if (!bytes.length) throw new Error("conteúdo colado vazio");
+  if (bytes.length > MAX_PASTED) throw new Error(`conteúdo colado grande demais (${Math.round(bytes.length / 1048576)} MB; máximo ${MAX_PASTED / 1048576} MB)`);
+  // pasta privada (0700) e que não seja link: a pasta fica em tmp, que outros usuários/processos podem alcançar
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const st = fs.lstatSync(dir);
+  if (st.isSymbolicLink() || !st.isDirectory() || (typeof process.getuid === "function" && st.uid !== process.getuid())) throw new Error("pasta temporária insegura");
+  const ext = PASTE_EXT[mime] ?? "bin";
+  const stamp = `${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}-${two(now.getHours())}${two(now.getMinutes())}${two(now.getSeconds())}`;
+  const clean = path.basename(String(name ?? "")).replace(/[^\p{L}\p{N}._ -]/gu, "_").replace(/^\.+/, "").slice(0, 80);
+  const base = clean && /\.[A-Za-z0-9]{1,5}$/.test(clean) && clean !== `image.${ext}` ? clean : `${mime?.startsWith("image/") ? "captura" : "colado"}-${stamp}.${ext}`;
+  let dest = path.join(dir, base);
+  // criação exclusiva ("wx"): não sobrescreve nem segue link, sem janela entre checar e gravar
+  for (let i = 1; ; i++) {
+    try { fs.writeFileSync(dest, bytes, { flag: "wx", mode: 0o600 }); break; }
+    catch (e) { if (e?.code !== "EEXIST" || i > 1000) throw e; dest = path.join(dir, base.replace(/(\.[^.]*)?$/, `-${i}$1`)); }
+  }
+  for (const f of fs.readdirSync(dir)) { // limpeza: nada fica para sempre em tmp
+    try { const p = path.join(dir, f); if (now.getTime() - fs.statSync(p).mtimeMs > 7 * 86_400_000) fs.rmSync(p, { force: true }); } catch { /* arquivo em uso */ }
+  }
+  return dest;
+}

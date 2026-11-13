@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { listDir, readPreview } from "./files.mjs";
+import { listDir, readPreview, savePasted } from "./files.mjs";
 import { RELEASES_URL, download, evaluate, fetchLatest, hostArch } from "./updater.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -62,7 +62,9 @@ function loadKey() {
 }
 const endpointWaiters = new Map(); // sessionId → resolve do próximo endpointResult
 
-const send = (sessionId, ev) => win?.webContents.send("brito:event", { sessionId, ev });
+/** A janela pode já ter sido destruída quando um backend avisa que fechou (fechar o app): `win?.` sozinho não basta. */
+const live = () => !!win && !win.isDestroyed() && !win.webContents.isDestroyed();
+const send = (sessionId, ev) => { if (live()) win.webContents.send("brito:event", { sessionId, ev }); };
 
 function startBackend(sessionId, root, claudeId) {
   const cur = backends.get(sessionId);
@@ -113,6 +115,10 @@ const guarded = (root, fn) => {
     return { ok: true, data: fn() };
   } catch (e) { return { ok: false, error: String(e?.message ?? e) }; }
 };
+ipcMain.handle("paste:save", (_e, { name, mime, data }) => {
+  try { return { ok: true, path: savePasted(path.join(os.tmpdir(), "brito-paste"), name, mime, data) }; }
+  catch (e) { return { ok: false, error: String(e?.message ?? e) }; }
+});
 ipcMain.handle("fs:list", (_e, { root, rel }) => guarded(root, () => listDir(root, rel)));
 ipcMain.handle("fs:read", (_e, { root, rel }) => guarded(root, () => readPreview(root, rel)));
 
@@ -197,7 +203,7 @@ ipcMain.handle("update:install", async () => {
     // Windows: pasta temporária (o instalador roda e some). macOS/Linux: Downloads, onde o usuário o encontra.
     const dir = process.platform === "win32" ? path.join(os.tmpdir(), "brito-update") : app.getPath("downloads");
     const dest = path.join(dir, path.basename(u.asset.name));
-    await download({ url: u.asset.url, dest, size: u.asset.size, digest: u.asset.digest, onProgress: (received, total) => win?.webContents.send("update:progress", { received, total }) });
+    await download({ url: u.asset.url, dest, size: u.asset.size, digest: u.asset.digest, onProgress: (received, total) => { if (live()) win.webContents.send("update:progress", { received, total }); } });
     if (process.platform === "win32") {
       // Inno Setup em modo silencioso: fecha este app, troca os arquivos e reabre o Brito (ver brito.iss).
       spawn(dest, ["/SILENT", "/NOCANCEL", "/SP-", "/CLOSEAPPLICATIONS"], { detached: true, stdio: "ignore" }).unref();

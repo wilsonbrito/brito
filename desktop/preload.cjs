@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("brito", {
   pathOf: (file) => { try { return webUtils.getPathForFile(file); } catch { return ""; } },
+  savePasted: (name, mime, data) => ipcRenderer.invoke("paste:save", { name, mime, data }),
   load: () => ipcRenderer.invoke("store:load"),
   save: (state) => ipcRenderer.invoke("store:save", state),
   pickFolder: () => ipcRenderer.invoke("pickFolder"),

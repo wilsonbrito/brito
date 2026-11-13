@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 // @ts-ignore módulo .mjs do desktop, sem tipos
-import { listDir, readPreview, resolveInside } from "../desktop/files.mjs";
+import { listDir, readPreview, resolveInside, savePasted, MAX_PASTED } from "../desktop/files.mjs";
 
 function proj() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brito-prev-"));
@@ -70,4 +70,31 @@ test("readPreview: PDF, Word e PowerPoint voltam como documento em base64; .doc 
     }
     assert.equal(readPreview(p.dir, "old.doc").kind, "binary");
   } finally { p.cleanup(); }
+});
+
+test("savePasted: salva captura com nome datado, sanea nomes e não sobrescreve", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brito-paste-"));
+  try {
+    const now = new Date(2026, 10, 13, 9, 5, 7);
+    const a = savePasted(dir, "image.png", "image/png", new Uint8Array([1, 2, 3]), now);
+    assert.equal(path.basename(a), "captura-20261113-090507.png");
+    assert.deepEqual([...fs.readFileSync(a)], [1, 2, 3]);
+    const b = savePasted(dir, "image.png", "image/png", new Uint8Array([9]), now);
+    assert.notEqual(a, b); assert.equal(path.basename(b), "captura-20261113-090507-1.png");
+    const c = savePasted(dir, "../../etc/relatório final.pdf", "application/pdf", new Uint8Array([1]), now);
+    assert.equal(path.dirname(c), dir); assert.equal(path.basename(c), "relatório final.pdf");
+    assert.throws(() => savePasted(dir, "x.png", "image/png", new Uint8Array(0)), /vazio/);
+    assert.throws(() => savePasted(dir, "x.png", "image/png", new Uint8Array(MAX_PASTED + 1)), /grande demais/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("savePasted: apaga colados com mais de 7 dias", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brito-paste-"));
+  try {
+    const velho = path.join(dir, "velho.png"); fs.writeFileSync(velho, "x");
+    const old = new Date(Date.now() - 8 * 86_400_000); fs.utimesSync(velho, old, old);
+    savePasted(dir, "novo.png", "image/png", new Uint8Array([1]));
+    assert.equal(fs.existsSync(velho), false);
+    assert.equal(fs.existsSync(path.join(dir, "novo.png")), true);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
