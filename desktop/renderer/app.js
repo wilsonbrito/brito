@@ -500,7 +500,7 @@ $("send").onclick = () => {
   if (t.trim()) { hist.push(t); histPos = -1; }
   if (t.trim() === "/clear") return clearSession();
   if (t.trim() === "/help" && s) {
-    note(s, "info", "/ abre comandos e skills · @ procura arquivos do projeto · arraste arquivos para o campo · ↑/↓ histórico · Esc interrompe · Ctrl+N nova sessão · /clear limpa · /fallback mostra o motor");
+    note(s, "info", "/ abre comandos e skills · @ procura arquivos do projeto · arraste ou cole (Ctrl+V) arquivos e imagens no campo · ↑/↓ histórico · Esc interrompe · Ctrl+N nova sessão · /clear limpa · /fallback mostra o motor");
     persist(); return renderAll();
   }
   sendMessage(t);
@@ -535,13 +535,34 @@ $("input").addEventListener("blur", () => setTimeout(closePop, 100));
 const comp = $("composer");
 comp.addEventListener("dragover", (e) => { e.preventDefault(); comp.classList.add("drop"); });
 comp.addEventListener("dragleave", () => comp.classList.remove("drop"));
-comp.addEventListener("drop", (e) => {
-  e.preventDefault(); comp.classList.remove("drop");
-  const paths = [...(e.dataTransfer?.files ?? [])].map((f) => api.pathOf(f)).filter(Boolean);
+const insertPaths = (paths) => {
   if (!paths.length) return;
   const inp = $("input");
   inp.value += (inp.value && !/\s$/.test(inp.value) ? " " : "") + paths.map((p) => "@" + (/\s/.test(p) ? `"${p}"` : p)).join(" ") + " ";
   autosize(); inp.focus();
+};
+comp.addEventListener("drop", (e) => {
+  e.preventDefault(); comp.classList.remove("drop");
+  insertPaths([...(e.dataTransfer?.files ?? [])].map((f) => api.pathOf(f)).filter(Boolean));
+});
+// Ctrl+V com arquivo ou imagem na área de transferência: arquivo copiado no Explorer/Finder vira @caminho; captura de
+// tela (sem caminho no disco) é salva numa pasta temporária. Texto comum segue o fluxo normal do campo.
+$("input").addEventListener("paste", async (e) => {
+  const files = [...(e.clipboardData?.files ?? [])];
+  if (!files.length) return;
+  e.preventDefault();
+  const paths = [], errors = [];
+  for (const f of files) {
+    let p = api.pathOf(f);
+    if (!p) {
+      const r = await api.savePasted(f.name, f.type, await f.arrayBuffer());
+      if (r.ok) p = r.path; else errors.push(r.error);
+    }
+    if (p) paths.push(p);
+  }
+  insertPaths(paths);
+  const s = active();
+  if (errors.length && s) { note(s, "error", "Não consegui colar: " + errors.join("; ")); persist(); renderAll(); }
 });
 $("new-session").onclick = () => newSession();
 $("add-project").onclick = addProject;

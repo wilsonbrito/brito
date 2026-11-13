@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.0 — 2026-11-13
+
+### Added
+- **Paste files and images with Ctrl+V in the desktop app (#28).** A file copied in Explorer/Finder becomes `@path` in the message, like dragging it. A screenshot or an image copied from a browser, which has no file on disk, is saved to a temporary folder (`brito-paste`, cleaned after 7 days, 25 MB limit) and referenced the same way. Plain text pastes as before.
+
+### Fixed
+- **"TypeError: Object has been destroyed" when closing the desktop app on Windows (#30).** When the window closed, each backend reported that it had stopped and the main process tried to notify an already destroyed window (`win?.` only guards null). Notifications now check that the window and its web contents are still alive.
+
 ## 0.16.1 — 2026-11-13
 
 ### Fixed
