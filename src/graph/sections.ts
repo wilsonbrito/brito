@@ -24,7 +24,10 @@ export interface MdDoc {
 
 /** Siglas da NAA (e variantes sem acento); só estas valem como livro, para não confundir "Cap 3" com passagem. */
 const LIVROS = new Set(("Gn Êx Ex Lv Nm Dt Js Jz Rt 1Sm 2Sm 1Rs 2Rs 1Cr 2Cr Ed Ne Et Jó Sl Pv Ec Ct Is Jr Lm Ez Dn Os Jl Am Ob Jn Mq Na Hc Sf Ag Zc Ml " +
-  "Mt Mc Lc Jo At Rm 1Co 2Co Gl Ef Fp Cl 1Ts 2Ts 1Tm 2Tm Tt Fm Hb Tg 1Pe 2Pe 1Jo 2Jo 3Jo Jd Ap").split(" "));
+  "Mt Mc Lc Jo At Rm 1Co 2Co Gl Ef Fp Cl 1Ts 2Ts 1Tm 2Tm Tt Fm Hb Tg 1Pe 2Pe 1Jo 2Jo 3Jo Jd Ap " +
+  // formas longas e variantes usuais em português (as fichas do cofre usam "1Cor", "Hab" etc.)
+  "Gên Gen Êxo Exo Lev Núm Num Deut Jos Juí Jz Rute 1Sam 2Sam 1Re 2Re 1Cr 2Cr Esd Est Jó Sal Prov Ecl Cant Isa Jer Lam Eze Ezq Dan Ose Joe Amó Abd Jon Miq Naum Hab Sof Ageu Zac Mal " +
+  "Mat Mar Luc Joã Atos Rom 1Cor 2Cor Gál Efé Fil Col 1Tes 2Tes 1Tim 2Tim Tito Filem Heb Tia 1Ped 2Ped 1Joã 2Joã 3Joã Jud Apoc").split(" "));
 
 /** "Rm 9.13; Rm 3.25-26; Ob 15" → ["Rm 9.13","Rm 3.25","Rm 3.26","Ob 15"]. Intervalo vira um item por versículo (máx. 60). */
 export function parsePassagens(txt: string): string[] {

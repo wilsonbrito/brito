@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.16.0 — 2026-11-13
+
+Searching a note vault now follows the graph, and there is a tool to explain how two notes relate.
+
+### Added
+- **`vault_path(de, para)`.** Cheapest path between two notes or Bible passages (A* with landmarks), with the relation of each hop (`autor`, `fonte`, `temas`, `menciona`, `cita`) and the opening text of each note. Edge cost depends on the relation and on how connected a node is, so paths avoid hubs like the index page. Example: Anselmo → his chapter note → `[Sl 25.10]` → *Amor de Deus*, a link no note states directly.
+- **`vault_search` follows the graph.** After the keyword hits it lists related notes that do not contain the words but link to the hits (personalized PageRank), with the reason (`via ...`). When the question names two notes ("o que Anselmo diz sobre Amor de Deus"), it returns the notes linked to both.
+- Reproducible simulation in `scripts/poc-sim.ts` (595 structure-derived questions on a real 460-note vault): PPR beat BM25 on hidden-link recovery (recall@10 57% -> 75%, CI [14, 21] points); A* avoided hub shortcuts in 98% of pairs vs 85% for plain BFS. Ground truth comes from the graph itself for two of the three question types, so treat it as evidence for the mechanism, not for answer quality.
+
+### Fixed
+- Bible references written as `1Cor`, `2Cor`, `Hab` (and other common Portuguese abbreviations) were dropped by the 0.15.0 book whitelist.
+
 ## 0.15.0 — 2026-11-13
 
 Note vaults get searchable sections, Bible references and a one-call text search.

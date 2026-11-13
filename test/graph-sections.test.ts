@@ -59,3 +59,7 @@ test("vaultSearch acha seção sem acento/caixa, mostra linhas e vizinhos do gra
     assert.match(await vaultSearch(root, store, "xyzinexistente"), /nada encontrado/);
   } finally { await store.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test("parsePassagens aceita variantes usuais (1Cor, Hab)", () => {
+  assert.deepEqual(parsePassagens("1Cor 1.23; Hab 3.5; 2Cor 5"), ["1Cor 1.23", "Hab 3.5", "2Cor 5"]);
+});
