@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 // @ts-ignore módulo .mjs do desktop, sem tipos
-import { listDir, readPreview, resolveInside, savePasted, MAX_PASTED } from "../desktop/files.mjs";
+import { listDir, readPreview, resolveInside, savePasted, MAX_PASTED, writeStore } from "../desktop/files.mjs";
 
 function proj() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brito-prev-"));
@@ -96,5 +96,21 @@ test("savePasted: apaga colados com mais de 7 dias", () => {
     savePasted(dir, "novo.png", "image/png", new Uint8Array([1]));
     assert.equal(fs.existsSync(velho), false);
     assert.equal(fs.existsSync(path.join(dir, "novo.png")), true);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("writeStore: edição externa vira backup antes de ser substituída; sem edição externa não cria backup", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brito-store-"));
+  const file = path.join(dir, "desktop.json");
+  try {
+    let r = writeStore(file, '{"v":1}', null);
+    assert.equal(r.backup, null);
+    r = writeStore(file, '{"v":2}', r.mtimeMs); // ninguém mexeu: sem backup
+    assert.equal(r.backup, null);
+    fs.writeFileSync(file, '{"v":"editado por fora"}'); // alguém edita com o app aberto
+    const future = new Date(Date.now() + 5000); fs.utimesSync(file, future, future);
+    const w = writeStore(file, '{"v":3}', r.mtimeMs);
+    assert.ok(w.backup && fs.readFileSync(w.backup, "utf8").includes("editado por fora"));
+    assert.equal(fs.readFileSync(file, "utf8"), '{"v":3}');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
