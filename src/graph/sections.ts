@@ -8,7 +8,7 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import type { GraphStore } from "./store.js";
 
-export const SECTIONS_VERSION = "m1";
+export const SECTIONS_VERSION = "m2";
 const MD_RE = /\.(md|markdown)$/i;
 /** Formatos que só viram metadado (Doc sem seções): a fonte de verdade é o .md derivado deles. */
 const META_RE = /\.(pdf|epub|docx)$/i;

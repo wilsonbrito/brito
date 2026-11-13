@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.16.1 — 2026-11-13
+
+### Fixed
+- Vaults already indexed by 0.15.0 now pick up the Bible-reference fix (`1Cor`, `2Cor`, `Hab`...) on their own: the section indexer version changed, so notes are re-read once. Before, only `brito index --full` refreshed them.
+
 ## 0.16.0 — 2026-11-13
 
 Searching a note vault now follows the graph, and there is a tool to explain how two notes relate.
