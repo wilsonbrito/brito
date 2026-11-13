@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.17.1 — 2026-11-13
+
+### Fixed
+- **The desktop app no longer silently overwrites edits made to `~/.brito/desktop.json` while it is open (#30).** If the file changed on disk since the app read or wrote it, the external version is copied to `desktop.externo-<date>.json` (the 3 most recent are kept) before the app saves its own state.
+
 ## 0.17.0 — 2026-11-13
 
 ### Added
