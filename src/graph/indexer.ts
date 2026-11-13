@@ -9,6 +9,7 @@ import { GraphStore } from "./store.js";
 import { SFC_EXT, componentName, splitSfc, templateCalleeNames } from "./sfc.js";
 import { Aliases, aliasCandidates } from "./aliases.js";
 import { IDREF_PREFIX, IdIndex, MD_EXT, WIKI_PREFIX, WikiIndex, extractMarkdown } from "./markdown.js";
+import { indexSections } from "./sections.js";
 import { EXTRA_EXT, ProjectIndex, extractLang, isExtraLang, type Binding, type Call, type ExtraLang, type Sym } from "./langs.js";
 
 const require = createRequire(import.meta.url);
@@ -184,6 +185,8 @@ export interface IndexOptions { full?: boolean; onProgress?: (m: string) => void
 export interface IndexStats {
   files: number; symbols: number; calls: number; imports: number;
   added: number; changed: number; removed: number; unchanged: number;
+  /** Markdown (Doc/Secao/LIGA/CITA); mdChanged = docs adicionados+alterados+removidos nesta rodada. */
+  docs?: number; secoes?: number; ligas?: number; citas?: number; linksQuebrados?: number; mdChanged?: number;
 }
 
 interface StoredFile { hash: string; calls: string[]; imports: string[]; bindings: string[] }
@@ -236,7 +239,11 @@ const count = async (store: GraphStore, q: string) => Number((await store.run(q)
  */
 export async function indexProject(root: string, store: GraphStore, opts: IndexOptions = {}): Promise<IndexStats> {
   const release = await acquireIndexLock(root, opts.onProgress);
-  try { return await indexProjectLocked(root, store, opts); } finally { release(); }
+  try {
+    const code = await indexProjectLocked(root, store, opts);
+    const md = await indexSections(root, store, opts);
+    return { ...code, docs: md.docs, secoes: md.secoes, ligas: md.ligas, citas: md.citas, linksQuebrados: md.unresolved, mdChanged: md.added + md.changed + md.removed };
+  } finally { release(); }
 }
 
 /**

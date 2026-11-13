@@ -129,10 +129,21 @@ export class GraphStore {
       "CREATE REL TABLE IF NOT EXISTS DEFINES(FROM File TO Symbol)",
       "CREATE REL TABLE IF NOT EXISTS CALLS(FROM Symbol TO Symbol)",
       "CREATE REL TABLE IF NOT EXISTS IMPORTS(FROM File TO File)",
+      // Markdown: Doc por arquivo, Secao por cabeçalho, LIGA = [[wikilink]], CITA = passagem bíblica.
+      "CREATE NODE TABLE IF NOT EXISTS Doc(path STRING, tipo STRING, titulo STRING, ano STRING, status STRING, tamanho INT64, PRIMARY KEY(path))",
+      "CREATE NODE TABLE IF NOT EXISTS Secao(id STRING, doc STRING, nivel INT64, titulo STRING, ordem INT64, texto STRING, PRIMARY KEY(id))",
+      "CREATE NODE TABLE IF NOT EXISTS Passagem(ref STRING, PRIMARY KEY(ref))",
+      "CREATE REL TABLE IF NOT EXISTS TEM_SECAO(FROM Doc TO Secao)",
+      "CREATE REL TABLE IF NOT EXISTS CITA(FROM Doc TO Passagem)",
+      "CREATE REL TABLE IF NOT EXISTS LIGA(FROM Doc TO Doc, tipo STRING)",
     ];
     for (const q of ddl) await drain(await this.conn!.query(q), false);
     // Bancos criados antes do indexador incremental não têm estas colunas.
     for (const col of ["calls", "imports", "bindings"]) await drain(await this.conn!.query(`ALTER TABLE File ADD IF NOT EXISTS ${col} STRING[] DEFAULT []`), false);
+    for (const q of [
+      "ALTER TABLE Doc ADD IF NOT EXISTS hash STRING DEFAULT ''", "ALTER TABLE Doc ADD IF NOT EXISTS links STRING[] DEFAULT []",
+      "ALTER TABLE Secao ADD IF NOT EXISTS startLine INT64 DEFAULT 0", "ALTER TABLE Secao ADD IF NOT EXISTS endLine INT64 DEFAULT 0",
+    ]) await drain(await this.conn!.query(q), false);
   }
 
   /** Serializa as queries: leituras paralelas de subagentes dividem uma única Connection. */

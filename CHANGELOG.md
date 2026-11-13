@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.0 — 2026-11-13
+
+Note vaults get searchable sections, Bible references and a one-call text search.
+
+### Added
+- **Sections in the graph.** Each `.md` also becomes a `Doc` with one `Secao` per heading (text and line range), `LIGA` edges for `[[wikilinks]]` (typed by frontmatter key or `menciona`) and `CITA` edges to Bible references (`Rm 3.25-26` becomes one node per verse; only known book abbreviations count). PDF/EPUB/DOCX become metadata-only `Doc` nodes. Incremental: an unchanged vault re-indexes in ~250 ms.
+- **`vault_search` tool.** Accent/case-insensitive search over note sections (file + `start-end` lines + graph neighbours of the top hit) plus book/lecture excerpts with page from `.brito/textos.db` when present. Always loaded for MCP clients.
+- `brito index` prints docs, sections, links, citations and unresolved links.
+
 ## 0.14.0 — 2026-11-12
 
 Note vaults (`.md` without code) now get a real graph and three ready-made tools. On a 318-note vault they cut ~28% of tokens and ~48% of cost at equal accuracy.

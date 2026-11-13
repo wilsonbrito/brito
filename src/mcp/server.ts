@@ -12,6 +12,7 @@ import { implementIo } from "../tools/implement.js";
 import "../tools/spec.js";
 import { ORCH_ONLY, orch } from "../orchestrator.js";
 import "../tools/digest.js";
+import "../tools/vault.js";
 import { allTools, execTool, type ToolContext } from "../tools/registry.js";
 import { GraphStore } from "../graph/store.js";
 import { INDEXED_EXTENSIONS, indexProject } from "../graph/indexer.js";
@@ -37,7 +38,7 @@ export const MCP_INSTRUCTIONS = [
  * tools de consulta, que são baratas e de uso frequente. As de escrita e a de aprovação (interna) continuam adiadas.
  */
 export const ALWAYS_LOAD_META = "anthropic/alwaysLoad";
-export const alwaysLoaded = (tool: string) => /^(graph_|recall$|remember$|skill_load$|digest$|implement$)/.test(tool);
+export const alwaysLoaded = (tool: string) => /^(graph_|recall$|remember$|skill_load$|digest$|implement$|vault_)/.test(tool);
 
 /** Prefixo com que o claude CLI enxerga as tools deste servidor. */
 export const MCP_PREFIX = `mcp__${MCP_NAME}__`;

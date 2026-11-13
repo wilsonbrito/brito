@@ -17,6 +17,7 @@ import "../tools/implement.js";
 import "../tools/spec.js";
 import "../tools/skills.js";
 import "../tools/digest.js";
+import "../tools/vault.js";
 import "../tools/todo.js";
 import { Agent, type TurnRecord } from "../agent/loop.js";
 import { loadSession, repairHistory, saveSession, titleOf, type SavedSession } from "../agent/sessions.js";

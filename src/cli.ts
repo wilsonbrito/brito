@@ -29,6 +29,7 @@ import { addRule, loadRules, projectSettingsPath } from "./rules.js";
 import { serveMcp } from "./mcp/server.js";
 import "./tools/skills.js";
 import "./tools/digest.js";
+import "./tools/vault.js";
 import type { ToolContext } from "./tools/registry.js";
 import { adviseSkill, approvePending, lintSkill, listBuiltins, listPending, listSkills, rejectPending, skillsIndex, staleRefs } from "./skills/store.js";
 import { applyProposal, autoConsolidate, describeProposal, proposeConsolidation, pruneCandidates, type Proposal } from "./skills/consolidate.js";
@@ -63,7 +64,7 @@ program
     const g = await GraphStore.open(root);
     const t = Date.now();
     const s = await indexProject(root, g, { full: o.full, onProgress: (m) => console.log(m) });
-    console.log(`OK: ${s.files} arquivos, ${s.symbols} símbolos, ${s.calls} chamadas, ${s.imports} imports | +${s.added} ~${s.changed} -${s.removed} =${s.unchanged} (${Date.now() - t}ms)`);
+    console.log(`OK: ${s.files} arquivos, ${s.symbols} símbolos, ${s.calls} chamadas, ${s.imports} imports | +${s.added} ~${s.changed} -${s.removed} =${s.unchanged}${s.docs ? ` | ${s.docs} docs, ${s.secoes} seções, ${s.ligas} ligações, ${s.citas} citações, ${s.linksQuebrados} links sem destino` : ""} (${Date.now() - t}ms)`);
     await g.close();
   });
 
