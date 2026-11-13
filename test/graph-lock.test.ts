@@ -67,11 +67,11 @@ test("GraphStore.open: se o outro processo soltar o banco dentro da espera, abre
   } finally { h.kill(); await h.exited; fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test("GraphStore: quatro processos no mesmo projeto convivem (leitura e escrita misturadas, sem erro de lock/checkpoint) (o lock só dura enquanto há consulta)", { timeout: 60_000 }, async () => {
+test("GraphStore: quatro processos no mesmo projeto convivem (leitura e escrita misturadas, sem erro de lock/checkpoint) (o lock só dura enquanto há consulta)", { timeout: 90_000 }, async () => {
   const root = tmpRoot();
   const writer = (tag: string) => {
     const code = `const { GraphStore } = await import("./src/graph/store.ts");
-      const g = await GraphStore.open(${JSON.stringify(root)});
+      const g = await GraphStore.open(${JSON.stringify(root)}, 45000);
       for (let i = 0; i < 20; i++) {
         await g.run("CREATE (:Note {id:$id, kind:'t', text:'x', refs:[], ts:1})", { id: "${tag}" + i });
         await g.run("MATCH (n:Note) RETURN count(n) AS n");

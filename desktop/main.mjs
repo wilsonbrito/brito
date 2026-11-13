@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { listDir, readPreview, savePasted } from "./files.mjs";
+import { listDir, readPreview, savePasted, writeStore } from "./files.mjs";
 import { RELEASES_URL, download, evaluate, fetchLatest, hostArch } from "./updater.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -122,14 +122,15 @@ ipcMain.handle("paste:save", (_e, { name, mime, data }) => {
 ipcMain.handle("fs:list", (_e, { root, rel }) => guarded(root, () => listDir(root, rel)));
 ipcMain.handle("fs:read", (_e, { root, rel }) => guarded(root, () => readPreview(root, rel)));
 
+let storeMtime = null; // mtime do desktop.json quando o app o leu/gravou: se mudar por fora, a versão externa vai para backup
 ipcMain.handle("store:load", () => {
-  try { const st = JSON.parse(fs.readFileSync(storePath, "utf8")); allowProjects(st); return st; } catch { return null; }
+  try { const st = JSON.parse(fs.readFileSync(storePath, "utf8")); storeMtime = fs.statSync(storePath).mtimeMs; allowProjects(st); return st; } catch { return null; }
 });
 ipcMain.handle("store:save", (_e, state) => {
   allowProjects(state);
-  fs.mkdirSync(path.dirname(storePath), { recursive: true });
-  fs.writeFileSync(storePath + ".tmp", JSON.stringify(state));
-  fs.renameSync(storePath + ".tmp", storePath);
+  const r = writeStore(storePath, JSON.stringify(state), storeMtime);
+  storeMtime = r.mtimeMs;
+  if (r.backup) console.warn(`desktop.json foi editado fora do app; a versão externa ficou em ${r.backup}`);
 });
 ipcMain.handle("pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"] });

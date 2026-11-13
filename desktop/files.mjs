@@ -105,3 +105,34 @@ export function savePasted(dir, name, mime, data, now = new Date()) {
   }
   return dest;
 }
+
+/**
+ * Grava o estado do app (desktop.json) sem perder edição externa: se o arquivo mudou no disco desde que o app o leu ou
+ * gravou (`expectedMtimeMs`), a versão de fora vai para `desktop.externo-<data>.json` antes de ser substituída
+ * (as 3 mais recentes ficam). Devolve o novo mtime, para a próxima gravação comparar.
+ */
+export function writeStore(file, json, expectedMtimeMs, now = new Date()) {
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true });
+  let backup = null;
+  let fd = null;
+  try { fd = fs.openSync(file, "r"); } catch { /* primeiro uso: não há arquivo */ }
+  if (fd !== null) { // um só descritor para medir e ler: sem janela entre checar e usar
+    try {
+      const mtime = fs.fstatSync(fd).mtimeMs;
+      const cur = fs.readFileSync(fd, "utf8");
+      if (expectedMtimeMs != null && Math.abs(mtime - expectedMtimeMs) > 5 && cur !== json) {
+        const base = path.basename(file).replace(/\.json$/, "");
+        backup = path.join(dir, `${base}.externo-${now.toISOString().replace(/[:.]/g, "-")}.json`);
+        fs.writeFileSync(backup, cur, { flag: "wx", mode: 0o600 });
+        for (const f of fs.readdirSync(dir).filter((x) => x.startsWith(`${base}.externo-`)).sort().reverse().slice(3)) fs.rmSync(path.join(dir, f), { force: true });
+      }
+    } finally { fs.closeSync(fd); }
+  }
+  const tmp = file + ".tmp";
+  const out = fs.openSync(tmp, "w", 0o600);
+  let mtimeMs;
+  try { fs.writeSync(out, json); mtimeMs = fs.fstatSync(out).mtimeMs; } finally { fs.closeSync(out); }
+  fs.renameSync(tmp, file);
+  return { mtimeMs, backup };
+}
