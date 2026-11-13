@@ -112,19 +112,27 @@ export function savePasted(dir, name, mime, data, now = new Date()) {
  * (as 3 mais recentes ficam). Devolve o novo mtime, para a próxima gravação comparar.
  */
 export function writeStore(file, json, expectedMtimeMs, now = new Date()) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true });
   let backup = null;
-  try {
-    const st = fs.statSync(file);
-    if (expectedMtimeMs != null && Math.abs(st.mtimeMs - expectedMtimeMs) > 5 && fs.readFileSync(file, "utf8") !== json) {
-      const base = path.basename(file).replace(/\.json$/, "");
-      backup = path.join(path.dirname(file), `${base}.externo-${now.toISOString().replace(/[:.]/g, "-")}.json`);
-      fs.copyFileSync(file, backup);
-      const old = fs.readdirSync(path.dirname(file)).filter((f) => f.startsWith(`${base}.externo-`)).sort().reverse().slice(3);
-      for (const f of old) fs.rmSync(path.join(path.dirname(file), f), { force: true });
-    }
-  } catch { /* primeiro uso: não há arquivo */ }
-  fs.writeFileSync(file + ".tmp", json);
-  fs.renameSync(file + ".tmp", file);
-  return { mtimeMs: fs.statSync(file).mtimeMs, backup };
+  let fd = null;
+  try { fd = fs.openSync(file, "r"); } catch { /* primeiro uso: não há arquivo */ }
+  if (fd !== null) { // um só descritor para medir e ler: sem janela entre checar e usar
+    try {
+      const mtime = fs.fstatSync(fd).mtimeMs;
+      const cur = fs.readFileSync(fd, "utf8");
+      if (expectedMtimeMs != null && Math.abs(mtime - expectedMtimeMs) > 5 && cur !== json) {
+        const base = path.basename(file).replace(/\.json$/, "");
+        backup = path.join(dir, `${base}.externo-${now.toISOString().replace(/[:.]/g, "-")}.json`);
+        fs.writeFileSync(backup, cur, { flag: "wx", mode: 0o600 });
+        for (const f of fs.readdirSync(dir).filter((x) => x.startsWith(`${base}.externo-`)).sort().reverse().slice(3)) fs.rmSync(path.join(dir, f), { force: true });
+      }
+    } finally { fs.closeSync(fd); }
+  }
+  const tmp = file + ".tmp";
+  const out = fs.openSync(tmp, "w", 0o600);
+  let mtimeMs;
+  try { fs.writeSync(out, json); mtimeMs = fs.fstatSync(out).mtimeMs; } finally { fs.closeSync(out); }
+  fs.renameSync(tmp, file);
+  return { mtimeMs, backup };
 }
