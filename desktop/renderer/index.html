@@ -33,6 +33,7 @@
         <div id="pop" hidden></div>
         <div id="composer">
           <textarea id="input" rows="1" placeholder="O que vamos construir?"></textarea>
+          <div id="editor" hidden></div>
           <div id="controls">
             <select id="mode" title="Permissões">
               <option value="manual">Perguntar</option>
@@ -59,6 +60,7 @@
               <option value="high">Alto</option>
               <option value="max">Máx</option>
             </select>
+            <button id="expand" title="Modo editor (Ctrl+Shift+E)" hidden>⤢</button>
             <button id="send" title="Enviar (Enter)">↑</button>
           </div>
         </div>
@@ -72,6 +74,7 @@
   </div></div>
   <div id="palette" hidden><div id="pal-box"><input id="pal-in" placeholder="Digite um comando ou o nome de uma sessão…" autocomplete="off" /><div id="pal-list"></div></div></div>
   <script src="markdown.js"></script>
+  <script src="editor.bundle.js"></script>
   <script src="app.js"></script>
   <script src="panels.js"></script>
   <script src="preview.js"></script>

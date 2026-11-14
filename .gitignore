@@ -10,3 +10,4 @@ desktop/dist-app/
 desktop/build/icon.icns
 desktop/build/icon.ico
 .brito/skills/.last-consolidate
+desktop/renderer/editor.bundle.js

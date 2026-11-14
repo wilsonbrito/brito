@@ -1,4 +1,21 @@
 const $ = (id) => document.getElementById(id);
+// Campo de entrada: editor CodeMirror (Markdown) quando o pacote existe; senão cai no <textarea> original.
+// "chat": Enter envia. "editor": Enter quebra a linha e Ctrl/Cmd+Enter envia (preferência guardada no localStorage).
+let editorMode = localStorage.getItem("brito.editorMode") === "1";
+const composerInput = (() => {
+  if (!window.BritoEditor) return $("input");
+  $("input").hidden = true; $("editor").hidden = false; $("expand").hidden = false;
+  return window.BritoEditor.create($("editor"), { placeholder: $("input").placeholder, mode: editorMode ? "editor" : "chat" });
+})();
+function applyEditorMode() {
+  if (!composerInput.isEditor) return;
+  composerInput.setMode(editorMode ? "editor" : "chat");
+  $("composer").classList.toggle("editor-mode", editorMode);
+  $("expand").classList.toggle("on", editorMode);
+  $("send").title = $("send").classList.contains("stop") ? "Interromper" : editorMode ? "Enviar (Ctrl+Enter)" : "Enviar (Enter)";
+  localStorage.setItem("brito.editorMode", editorMode ? "1" : "0");
+}
+function toggleEditorMode() { editorMode = !editorMode; applyEditorMode(); composerInput.focus(); }
 const api = window.brito;
 
 let state = { projects: [], sessions: [], activeId: null, settings: { model: "", effort: "", mode: "manual", orch: "" } };
@@ -27,7 +44,7 @@ function newSession(projectPath) {
   const s = { id: uid(), project: p, title: "Nova sessão", claudeId: null, updated: Date.now(), items: [], settings: { ...state.settings } };
   state.sessions.unshift(s);
   state.activeId = s.id;
-  persist(); renderAll(); $("input").focus();
+  persist(); renderAll(); composerInput.focus();
 }
 
 async function addProject() {
@@ -225,7 +242,7 @@ function renderTop() {
   $("meta").textContent = s ? projectOf(s)?.path ?? "" : "";
   $("send").textContent = r?.busy ? "■" : "↑";
   $("send").classList.toggle("stop", !!r?.busy);
-  $("send").title = r?.busy ? "Interromper" : "Enviar (Enter)";
+  $("send").title = r?.busy ? "Interromper" : editorMode ? "Enviar (Ctrl+Enter)" : "Enviar (Enter)";
   const set = s?.settings ?? state.settings;
   $("mode").value = set.mode; $("model").value = set.model; $("effort").value = set.effort; $("orch").value = set.orch ?? "";
   const b = r?.backend ?? "off";
@@ -456,7 +473,7 @@ function drawPop() {
 function acceptPop() {
   const it = pop.items[pop.idx];
   if (!it) return;
-  const inp = $("input");
+  const inp = composerInput;
   const ins = pop.kind === "/" ? `/${it.name} ` : `@${it} `;
   inp.value = inp.value.slice(0, pop.from) + ins + inp.value.slice(inp.selectionStart);
   inp.selectionStart = inp.selectionEnd = pop.from + ins.length;
@@ -464,7 +481,7 @@ function acceptPop() {
 }
 let popSeq = 0;
 async function updatePop() {
-  const inp = $("input");
+  const inp = composerInput;
   const before = inp.value.slice(0, inp.selectionStart);
   const at = before.match(/(?:^|\s)@([^\s@]*)$/);
   const sl = before.match(/^\/([^\s/]*)$/);
@@ -495,8 +512,8 @@ async function clearSession() {
 $("send").onclick = () => {
   const s = active();
   if (s && runtime(s.id).busy) return api.write(s.id, { t: "abort" });
-  const t = $("input").value;
-  $("input").value = ""; autosize();
+  const t = composerInput.value;
+  composerInput.value = ""; autosize();
   if (t.trim()) { hist.push(t); histPos = -1; }
   if (t.trim() === "/clear") return clearSession();
   if (t.trim() === "/help" && s) {
@@ -505,19 +522,19 @@ $("send").onclick = () => {
   }
   sendMessage(t);
 };
-$("input").addEventListener("keydown", (e) => {
+composerInput.addEventListener("keydown", (e) => {
   const inp = e.target;
   if (!$("pop").hidden) {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") { pop.idx = (pop.idx + (e.key === "ArrowDown" ? 1 : pop.items.length - 1)) % pop.items.length; drawPop(); e.preventDefault(); return; }
     if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !e.isComposing)) { acceptPop(); e.preventDefault(); return; }
     if (e.key === "Escape") { closePop(); e.preventDefault(); return; }
   }
-  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("send").click(); }
+  if (e.key === "Enter" && !e.isComposing && (editorMode ? e.ctrlKey || e.metaKey : !e.shiftKey)) { e.preventDefault(); $("send").click(); }
   else if (e.key === "Escape") { const s = active(); if (s && runtime(s.id).busy) api.write(s.id, { t: "abort" }); }
-  else if (e.key === "ArrowUp" && hist.length && !inp.value.slice(0, inp.selectionStart).includes("\n")) {
+  else if (!editorMode && e.key === "ArrowUp" && hist.length && !inp.value.slice(0, inp.selectionStart).includes("\n")) {
     histPos = histPos < 0 ? hist.length - 1 : Math.max(0, histPos - 1);
     inp.value = hist[histPos]; autosize(); e.preventDefault();
-  } else if (e.key === "ArrowDown" && histPos >= 0) {
+  } else if (!editorMode && e.key === "ArrowDown" && histPos >= 0) {
     histPos++; inp.value = histPos >= hist.length ? "" : hist[histPos]; if (histPos >= hist.length) histPos = -1; autosize(); e.preventDefault();
   }
 });
@@ -528,16 +545,16 @@ $("messages").addEventListener("click", (e) => {
   navigator.clipboard.writeText(b.parentElement.querySelector("code").textContent);
   b.textContent = "copiado"; setTimeout(() => (b.textContent = "copiar"), 1200);
 });
-const autosize = () => { const i = $("input"); i.style.height = "auto"; i.style.height = Math.min(i.scrollHeight, 220) + "px"; };
-$("input").addEventListener("input", () => { autosize(); updatePop(); });
-$("input").addEventListener("blur", () => setTimeout(closePop, 100));
+const autosize = () => { const i = composerInput; if (i.isEditor) return; i.style.height = "auto"; i.style.height = Math.min(i.scrollHeight, 220) + "px"; };
+composerInput.addEventListener("input", () => { autosize(); updatePop(); });
+composerInput.addEventListener("blur", () => setTimeout(closePop, 100));
 // arrastar arquivos para o campo vira @caminho (o agente os lê com as ferramentas)
 const comp = $("composer");
 comp.addEventListener("dragover", (e) => { e.preventDefault(); comp.classList.add("drop"); });
 comp.addEventListener("dragleave", () => comp.classList.remove("drop"));
 const insertPaths = (paths) => {
   if (!paths.length) return;
-  const inp = $("input");
+  const inp = composerInput;
   inp.value += (inp.value && !/\s$/.test(inp.value) ? " " : "") + paths.map((p) => "@" + (/\s/.test(p) ? `"${p}"` : p)).join(" ") + " ";
   autosize(); inp.focus();
 };
@@ -547,7 +564,7 @@ comp.addEventListener("drop", (e) => {
 });
 // Ctrl+V com arquivo ou imagem na área de transferência: arquivo copiado no Explorer/Finder vira @caminho; captura de
 // tela (sem caminho no disco) é salva numa pasta temporária. Texto comum segue o fluxo normal do campo.
-$("input").addEventListener("paste", async (e) => {
+composerInput.addEventListener("paste", async (e) => {
   const files = [...(e.clipboardData?.files ?? [])];
   if (!files.length) return;
   e.preventDefault();
@@ -564,6 +581,9 @@ $("input").addEventListener("paste", async (e) => {
   const s = active();
   if (errors.length && s) { note(s, "error", "Não consegui colar: " + errors.join("; ")); persist(); renderAll(); }
 });
+$("expand").onclick = toggleEditorMode;
+document.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "e") { e.preventDefault(); toggleEditorMode(); } });
+applyEditorMode();
 $("new-session").onclick = () => newSession();
 $("add-project").onclick = addProject;
 $("search").oninput = (e) => { filter = e.target.value; renderSidebar(); };

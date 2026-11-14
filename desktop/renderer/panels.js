@@ -75,7 +75,7 @@ async function skillsView(s, q) {
       const full = await query(s.id, "skill", k.name);
       if (full?.body) bodyBox.append(txt("pre", "", full.body));
     }));
-    if (k.invoke === "manual") h.append(btn("Usar", () => { closePanel(); $("input").value = `/${k.name} `; $("input").focus(); }));
+    if (k.invoke === "manual") h.append(btn("Usar", () => { closePanel(); composerInput.value = `/${k.name} `; composerInput.focus(); }));
     if (!k.builtin && k.scope === "project") h.append(btn("Tornar global", () => act("skill.promote", k.name)));
     if (!k.builtin) h.append(btn("Remover", () => confirm(`Remover a skill ${k.name}? Ela vai para a lixeira.`) && act("skill.delete", k.name)));
     c.append(h, txt("div", "sub2", k.description), bodyBox);

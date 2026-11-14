@@ -265,3 +265,29 @@ code.fileref:hover { background: var(--line); }
 
 .note.skill { color: var(--accent, #7aa2f7); }
 #panel-btns button.pend { font-weight: 600; color: var(--warn); }
+
+/* Campo de entrada em CodeMirror (Markdown). No modo editor ele cresce, ganha números de linha e fonte monoespaçada. */
+#editor .cm-editor { background: none; outline: none; }
+#editor .cm-editor.cm-focused { outline: none; }
+#editor .cm-scroller { max-height: 220px; overflow: auto; font: inherit; line-height: 1.55; }
+#editor .cm-content { padding: 0; caret-color: var(--fg); }
+#editor .cm-line { padding: 0; }
+#editor .cm-placeholder { color: var(--mute); }
+#editor .cm-cursor { border-left-color: var(--fg); }
+#editor .cm-selectionBackground, #editor .cm-focused .cm-selectionBackground { background: #8119bd55; }
+#composer.editor-mode .cm-scroller { min-height: 200px; max-height: 55vh; font: 13px/1.6 ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; }
+#editor .cm-gutters { background: none; border: 0; color: var(--mute); padding-right: 6px; }
+#editor .cm-activeLine { background: #ffffff08; }
+#editor .cm-activeLineGutter { background: none; color: var(--fg); }
+/* realce de Markdown (classes do classHighlighter) */
+#editor .tok-heading { color: var(--accent2); font-weight: 700; }
+#editor .tok-strong { font-weight: 700; }
+#editor .tok-emphasis { font-style: italic; }
+#editor .tok-strikethrough { text-decoration: line-through; }
+#editor .tok-link, #editor .tok-url { color: #6cb6ff; }
+#editor .tok-quote { color: var(--mute); font-style: italic; }
+#editor .tok-monospace { color: var(--warn); font-family: ui-monospace, Menlo, Consolas, monospace; }
+#editor .tok-meta, #editor .tok-processingInstruction, #editor .tok-contentSeparator { color: var(--mute); }
+#expand { width: 28px; height: 28px; border-radius: 6px; color: var(--mute); font-size: 15px; }
+#expand:hover, #expand.on { background: var(--bg); color: var(--fg); }
+#expand.on { color: var(--accent2); }

@@ -33,6 +33,7 @@ for (const [p, hint] of [[electronDist, "npm --prefix desktop install"], [bundle
 function copyApp(appDir) {
   fs.mkdirSync(path.join(appDir, "dist"), { recursive: true });
   for (const f of ["main.mjs", "preload.cjs", "files.mjs", "updater.mjs"]) fs.copyFileSync(path.join(here, f), path.join(appDir, f));
+  sh(process.execPath, [path.join(here, "build-editor.mjs")]); // editor (CodeMirror) do campo de entrada
   fs.cpSync(path.join(here, "renderer"), path.join(appDir, "renderer"), { recursive: true });
   // Mermaid (diagramas no preview): vem do node_modules do desktop; sem ele os blocos ficam como código.
   const mermaid = path.join(here, "node_modules", "mermaid", "dist", "mermaid.min.js");
