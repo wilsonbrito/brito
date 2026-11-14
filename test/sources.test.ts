@@ -99,3 +99,36 @@ test("squashBig: mesmo resultado que squash, inclusive com acentos e janelas peq
   assert.equal(squashBig(t, 37), squash(t));
   assert.equal(squashBig("curto é", 500), squash("curto é"));
 });
+
+test("arquivo derivado (gerado_de:) não duplica a fonte: nem blocos, nem cobertura; a citação continua achada", async () => {
+  const { isDerived } = await import("../src/qatree/sources.js");
+  clearSourceCache();
+  const dir = tmp();
+  fs.mkdirSync(path.join(dir, "Textos", "Livros"), { recursive: true });
+  const livro = Array.from({ length: 40 }, (_, i) => sentence(i)).join("\n\n");
+  fs.writeFileSync(path.join(dir, "Textos", "livro.txt"), `\n=== PÁGINA 1 ===\n${livro}\n`);
+  const md = `---\ntipo: livro\ntitulo: "livro"\narquivo: "Textos/livro.txt"\ngerado_de: "Textos/livro.txt"\npaginas: 1\n---\n\n# livro\n\n## pdf 1\n\n${livro}\n`;
+  fs.writeFileSync(path.join(dir, "Textos", "Livros", "livro.md"), md);
+  fs.writeFileSync(path.join(dir, "nota.md"), `---\ntipo: tema\n---\n\n# Nota\n\nUma nota comum do projeto, com texto suficiente para formar um bloco válido na busca.`);
+  assert.ok(isDerived(md));
+  assert.ok(!isDerived(fs.readFileSync(path.join(dir, "nota.md"), "utf8")));
+  assert.ok(!isDerived("texto sem frontmatter\ngerado_de: x"));
+
+  const files = ["Textos/livro.txt", "Textos/Livros/livro.md", "nota.md"];
+  const c = buildCorpus(dir, files);
+  assert.equal(c.files, 2); // o txt e a nota; o .md derivado fica de fora
+  assert.ok(c.chunks.every((x) => x.file !== "Textos/Livros/livro.md"));
+  assert.equal(c.coverage.files, 2); assert.deepEqual(c.coverage.unreadable, []);
+  assert.ok(retrieve(c, "sentença número 7 providência", 5).every((x) => x.file !== "Textos/Livros/livro.md"));
+  assert.equal(findQuote(c, sentence(20).slice(4, 100))?.file, "Textos/livro.txt");
+});
+
+test("PDF com texto ao lado: nome parecido (sufixo/complemento) conta como coberto; outro nome, não", () => {
+  const files = [
+    "Textos/Livro Grande.txt", "PDFs/Livro Grande(1).pdf",                      // cópia "(1)" do mesmo livro
+    "Textos/download (Estilos de aprendizagem).txt", "PDFs/Recortes/download.pdf", // texto com complemento no nome
+    "PDFs/outro livro qualquer.pdf",                                              // sem texto
+    "PDFs/abc.pdf", "Textos/abcdef.txt",                                          // nomes curtos demais: não presume
+  ];
+  assert.deepEqual(docsWithoutText(files), ["PDFs/outro livro qualquer.pdf", "PDFs/abc.pdf"]);
+});

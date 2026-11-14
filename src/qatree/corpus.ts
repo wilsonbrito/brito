@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { QuoteIndex, isSource, norm, normalized, readText, registerRelease, touch, type Coverage } from "./sources.js";
+import { QuoteIndex, isDerived, isSource, norm, normalized, readText, registerRelease, touch, type Coverage } from "./sources.js";
 
 export { norm };
 
@@ -60,7 +60,7 @@ export function buildCorpus(root: string, allFiles: string[]): Corpus {
   let used = 0;
   for (const rel of files) {
     const r = readText(root, rel);
-    if ("error" in r) continue;
+    if ("error" in r || isDerived(r.text)) continue; // derivado de outro arquivo (gerado_de:): o original já entra
     used++;
     normalized(root, rel, r); // o mesmo texto já lido alimenta a conferência de citações (sem ler de novo)
     chunkText(r.text).forEach((c, i) => {
