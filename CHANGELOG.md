@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.17.2 — 2026-11-14
+
+### Added
+- **Markdown editor mode for the desktop input box (CodeMirror 6).** The ⤢ button (or Ctrl+Shift+E) switches the box to an IDE-like editor: Enter inserts a newline, Ctrl/Cmd+Enter sends, with line numbers, Markdown highlighting, Tab indent and list continuation. The default chat mode (Enter sends) is unchanged; the choice is remembered. The editor is bundled by `desktop/build-editor.mjs` (runs on `npm start` and when packaging); without the bundle the box falls back to the plain textarea.
+
 ## 0.17.1 — 2026-11-13
 
 ### Fixed
