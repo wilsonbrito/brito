@@ -17,6 +17,16 @@ export const MAX_BYTES = 100 * 1024 * 1024;
 export const isSource = (rel: string) =>
   TEXT_EXT.has(path.extname(rel).toLowerCase()) && !rel.startsWith(".brito/") && !/(^|\/)(node_modules|dist|package-lock\.json)/.test(rel);
 
+/**
+ * Arquivo DERIVADO de outro (frontmatter com `gerado_de:`), como o `.md` de um livro gerado a partir do `.txt`: o conteúdo
+ * já está na fonte original, então ler os dois dobraria a memória e repetiria o mesmo trecho nos resultados da busca.
+ */
+export function isDerived(text: string): boolean {
+  if (!text.startsWith("---\n")) return false;
+  const end = text.indexOf("\n---", 4);
+  return end > 0 && /^gerado_de:/m.test(text.slice(0, end));
+}
+
 export interface Coverage {
   /** arquivos de texto lidos e o total de bytes */
   files: number;
@@ -42,10 +52,14 @@ export function readText(root: string, rel: string): { text: string; size: numbe
 /** `Frame - Systematic Theology.pdf` e `Frame - Systematic Theology.txt` são o mesmo livro. */
 const stem = (rel: string) => norm(path.basename(rel, path.extname(rel)));
 
-/** PDFs/docx que não têm texto extraído ao lado (mesmo nome em algum arquivo de texto do projeto). */
+/**
+ * PDFs/docx que não têm texto extraído ao lado: nenhum arquivo de texto com o mesmo nome. Tolera sufixo ou complemento
+ * no nome ("Livro.pdf" × "Livro (1).txt", "download.pdf" × "download (Estilos).txt"): um nome ser prefixo do outro basta.
+ */
 export function docsWithoutText(files: string[]): string[] {
-  const texts = new Set(files.filter(isSource).map(stem));
-  return files.filter((f) => DOC_EXT.has(path.extname(f).toLowerCase()) && !texts.has(stem(f)));
+  const texts = files.filter(isSource).map(stem);
+  const covered = (s: string) => texts.some((t) => t === s || (Math.min(t.length, s.length) >= 6 && (t.startsWith(s) || s.startsWith(t))));
+  return files.filter((f) => DOC_EXT.has(path.extname(f).toLowerCase()) && !covered(stem(f)));
 }
 
 // ------------------------------------------------------------------ texto normalizado, em cache
@@ -73,7 +87,7 @@ export function squashBig(text: string, win = 262_144): string {
   return parts.join("");
 }
 
-interface Normed { sig: string; sq: string }
+interface Normed { sig: string; sq: string; /** derivado de outro arquivo: não conta como fonte (sq vazio) */ derived?: boolean }
 const cache = new Map<string, Normed>();
 let cached = 0;
 /** Memória do cache (~1 byte por caractere em texto latino). Acima disso, varre sem guardar (mais lento, igualmente completo). */
@@ -90,8 +104,8 @@ export function touch() {
   idle.unref?.();
 }
 
-function store(key: string, sig: string, sq: string): Normed {
-  const n: Normed = { sig, sq };
+function store(key: string, sig: string, sq: string, derived = false): Normed {
+  const n: Normed = derived ? { sig, sq, derived: true } : { sig, sq };
   const prev = cache.get(key);
   if (prev) { cached -= prev.sq.length; cache.delete(key); }
   if (sq.length <= NORM_CAP_CHARS) {
@@ -115,7 +129,8 @@ export function normalized(root: string, rel: string, read?: { text: string; siz
   if (hit && hit.sig === sig) return { n: hit, size: read?.size ?? st!.size };
   const r = read ?? readText(root, rel);
   if ("error" in r) return r;
-  return { n: store(key, sig, squashBig(r.text)), size: r.size };
+  const derived = isDerived(r.text);
+  return { n: store(key, sig, derived ? "" : squashBig(r.text), derived), size: r.size };
 }
 
 export function clearSourceCache() { cache.clear(); cached = 0; }
@@ -135,7 +150,7 @@ export class QuoteIndex {
     const c: Coverage = { files: 0, bytes: 0, unreadable: [], docsWithoutText: docsWithoutText(this.all) };
     for (const rel of this.files) {
       const r = normalized(this.root, rel);
-      if ("error" in r) c.unreadable.push({ file: rel, why: r.error }); else { c.files++; c.bytes += r.size; }
+      if ("error" in r) c.unreadable.push({ file: rel, why: r.error }); else if (!r.n.derived) { c.files++; c.bytes += r.size; }
     }
     return c;
   }

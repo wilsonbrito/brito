@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.1 — 2026-11-14
+
+### Fixed
+- **Árvore e conferência de citações não leem mais o mesmo livro duas vezes.** Arquivos com `gerado_de:` no frontmatter (por exemplo, o `.md` de um livro gerado a partir do seu `.txt` para entrar no grafo) são derivados do original: ficam fora do índice de busca, da cobertura e do cache de texto. Antes, um cofre com os dois formatos duplicaria os blocos nos resultados e a memória usada.
+- **Menos falso alerta de "PDF sem texto extraído".** Um PDF conta como coberto quando existe um arquivo de texto cujo nome é igual ou parecido (um nome ser prefixo do outro), como `Livro.pdf` e `Livro (1).txt`.
+
 ## 0.19.0 — 2026-11-14
 
 ### Added
