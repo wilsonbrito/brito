@@ -68,6 +68,20 @@ function treeNodes(snap) {
   return [txt("div", "sec2", "ÁRVORE (perguntas ❓ e respostas 💬; ✂️ = podada)"), root ? nodeView(snap, root, kids) : txt("div", "pmsg", "—")];
 }
 
+const fmtTok = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+/** Gasto estimado (~4 caracteres por token) separado entre o SLM local (grátis) e o Claude (gasta cota/tokens). */
+function usageLine(u) {
+  const part = (label, m) => (m.calls ? `${label}: ${m.calls} chamada${m.calls === 1 ? "" : "s"}, ~${fmtTok(m.tokensIn)} entrada / ~${fmtTok(m.tokensOut)} saída` : "");
+  return ["tokens (estimativa)", part("SLM local", u.slm), part("Claude", u.claude)].filter(Boolean).join("  ·  ");
+}
+
+function finalView(snap) {
+  if (!snap.final) return [];
+  const d = el("div", "card2 qt-final");
+  d.append(txt("div", "sec2", "RESPOSTA FINAL"), txt("div", "qt-final-text", snap.final));
+  return [d];
+}
+
 function renderTreeOut() {
   if (!treeUI) return;
   const s = active();
@@ -75,15 +89,73 @@ function renderTreeOut() {
   if (!snap) return treeUI.out.replaceChildren(txt("div", "pmsg", "Escreva uma pergunta e clique em “Gerar árvore”. A fonte são os arquivos de texto do projeto ativo."));
   const top = el("div", "qt-status" + (snap.error ? " err" : ""));
   top.append(txt("b", "", snap.error ? `Erro: ${snap.error}` : snap.done ? snap.phase : `${snap.phase}…`));
-  top.append(txt("span", "", `  ·  ${snap.calls}/${snap.maxCalls} chamadas  ·  ${snap.corpus.files} arquivos, ${snap.corpus.chunks} trechos  ·  ${snap.mode === "llm" ? "modelo real" : "demo"}`));
-  const body = snap.error ? [] : [...rankingView(snap), ...treeNodes(snap)];
+  top.append(txt("span", "", `  ·  ${snap.calls}/${snap.maxCalls} chamadas  ·  ${snap.corpus.files} arquivos, ${snap.corpus.chunks} trechos  ·  ${({ slm: "SLM local", hybrid: "híbrido (SLM + Claude)", claude: "Claude" })[snap.mode] ?? "demo"}`));
+  const body = snap.error ? [] : [...finalView(snap), ...rankingView(snap), ...treeNodes(snap)];
+  if (snap.usage) top.append(txt("div", "qt-usage", usageLine(snap.usage)));
   treeUI.out.replaceChildren(top, ...body);
   const run = document.getElementById("qt-run");
   if (run) { run.textContent = snap.done ? "Gerar árvore" : "Parar"; run.classList.toggle("stop", !snap.done); }
 }
 
+const fmtEst = (m) => (m.tokensIn || m.tokensOut ? `~${fmtTok(m.tokensIn)} entrada / ~${fmtTok(m.tokensOut)} saída` : "");
+
+/** `/arvore [--slm|--hibrido|--claude|--demo] [--gens N] pergunta`: roda a árvore pelo chat e entrega a resposta final nele. */
+async function runTreeCommand(s, line) {
+  const r = runtime(s.id);
+  composerInput.value = ""; autosize();
+  if (r.busy) return;
+  let rest = line.replace(/^\/arvore\s*/, ""), mode = "auto", gens;
+  const flags = { "--slm": "slm", "--hibrido": "hybrid", "--híbrido": "hybrid", "--claude": "claude", "--demo": "demo" };
+  for (let m; (m = rest.match(/^(--[\wí]+)\s*/i)); ) {
+    const f = m[1].toLowerCase();
+    if (f === "--gens") { const g = rest.slice(m[0].length).match(/^([1-3])\s*/); if (!g) break; gens = +g[1]; rest = rest.slice(m[0].length + g[0].length); continue; }
+    if (!flags[f]) break;
+    mode = flags[f]; rest = rest.slice(m[0].length);
+  }
+  const question = rest.trim();
+  s.items.push({ k: "user", text: line });
+  if (!question) { note(s, "warn", "Uso: /arvore [--slm|--hibrido|--claude|--demo] [--gens 1-3] pergunta. Sem opção, usa SLM + Claude (híbrido) se o SLM estiver baixado, senão o Claude."); return renderAll(); }
+  if (s.title === "Nova sessão") s.title = question.slice(0, 48);
+  s.updated = Date.now(); r.busy = true; renderAll();
+  if (!(await ensureBackend(s))) { r.busy = false; renderAll(); return; }
+  r.chatTree = { id: "chat-" + Date.now(), item: null };
+  api.write(s.id, { t: "tree", id: r.chatTree.id, question, mode, chat: true, ...(gens ? { gens } : {}) });
+}
+
+function onTreeEstimate(sessionId, ev) {
+  const s = state.sessions.find((x) => x.id === sessionId), r = runtime(sessionId);
+  if (!s || r.chatTree?.id !== ev.id) return;
+  const name = { slm: "SLM local", hybrid: "híbrido (SLM pesquisa, Claude julga)", claude: "Claude", demo: "demo" }[ev.mode] ?? ev.mode;
+  const parts = [fmtEst(ev.slm) && `SLM local ${fmtEst(ev.slm)} (grátis)`, fmtEst(ev.claude) && `Claude ${fmtEst(ev.claude)}`].filter(Boolean);
+  note(s, "info", `Árvore · modo ${name} · até ~${ev.calls} chamadas. Estimativa de tokens: ${parts.join(" · ") || "nenhum (sem modelo)"}. Esc ou Parar interrompe.`);
+  if (active()?.id === sessionId) renderAll();
+}
+
+/** No chat: um item de progresso atualizado no lugar e, ao fim, a resposta final como mensagem normal. */
+function chatTreeUpdate(s, r, snap) {
+  const ct = r.chatTree;
+  const prog = `Árvore: ${snap.phase}${snap.done ? "" : "…"} (${snap.calls}/${snap.maxCalls} chamadas)`;
+  if (!snap.done) {
+    if (!ct.item) { ct.item = { k: "info", msg: prog }; s.items.push(ct.item); } else ct.item.msg = prog;
+    return;
+  }
+  if (ct.item) s.items.splice(s.items.indexOf(ct.item), 1);
+  if (snap.error) note(s, "error", `Árvore: ${snap.error}`);
+  else {
+    const top = snap.ranking.find((x) => x.alive);
+    const lines = [snap.final || (top ? top.text : "Nenhuma resposta sobreviveu: os arquivos do projeto não sustentam esta pergunta.")];
+    const src = [...new Set((top?.quotes ?? []).filter((q) => q.ok).map((q) => q.file))];
+    if (src.length) lines.push("", "Fontes: " + src.join(", "));
+    if (snap.usage) lines.push("", "_" + usageLine(snap.usage) + " · " + snap.phase + "_");
+    s.items.push({ k: "text", text: lines.join("\n"), open: false });
+  }
+  r.busy = false; r.chatTree = null; persist();
+}
+
 function onTreeEvent(sessionId, ev) {
   runtime(sessionId).tree = ev.snapshot;
+  const rt = runtime(sessionId), cs = state.sessions.find((x) => x.id === sessionId);
+  if (cs && rt.chatTree?.id === ev.id) { chatTreeUpdate(cs, rt, ev.snapshot); if (active()?.id === sessionId) renderAll(); }
   const s = active();
   if (s && s.id === sessionId) { if (panelId === "tree") renderTreeOut(); else if (panelId === "treeviz") renderTreeViz(); }
 }
@@ -94,7 +166,7 @@ async function treeView(s) {
   const form = el("div", "card2 qt-form");
   const q = el("textarea", "qt-input"); q.rows = 3; q.placeholder = "Pergunta a investigar na fonte (ex.: Quando o cache de sessão expira?)"; q.value = treeForm.question;
   q.oninput = () => (treeForm.question = q.value);
-  const mode = el("select"); for (const [v, l] of [["demo", "Demo (sem custo — mostra o fluxo)"], ["llm", "Modelo real (gasta tokens)"]]) { const o = el("option"); o.value = v; o.textContent = l; mode.append(o); }
+  const mode = el("select"); for (const [v, l] of [["demo", "Demo (sem modelo — mostra o fluxo)"], ["slm", "SLM local (Qwen, sem custo)"], ["hybrid", "Híbrido (SLM pesquisa, Claude julga)"], ["claude", "Claude (gasta tokens)"]]) { const o = el("option"); o.value = v; o.textContent = l; mode.append(o); }
   mode.value = treeForm.mode; mode.onchange = () => (treeForm.mode = mode.value);
   const gens = el("select"); for (const [v, l] of [["2", "2 gerações"], ["3", "3 gerações (mais chamadas)"]]) { const o = el("option"); o.value = v; o.textContent = l; gens.append(o); }
   gens.value = treeForm.gens; gens.onchange = () => (treeForm.gens = gens.value);

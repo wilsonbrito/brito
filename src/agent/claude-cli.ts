@@ -11,7 +11,8 @@ import { ui as terminalUi } from "../ui/ui.js";
 import type { TurnSink } from "./sink.js";
 import { MODE_ENV, perms, type PermMode } from "../permissions.js";
 import { scrubbedEnv } from "../endpoint.js";
-import { CLAUDE_EDIT_TOOLS, ORCH_MCP_TIMEOUT, ORCH_NOTE, ORCH_NOTE_CLAUDE, orch, orchEnv } from "../orchestrator.js";
+import { profileFor } from "../profile.js";
+import { CLAUDE_EDIT_TOOLS, ORCH_MCP_TIMEOUT, ORCH_NOTE_CLAUDE, orchNoteFor, orch, orchEnv } from "../orchestrator.js";
 import { DEFAULT_MODEL, wireEffort } from "../model.js";
 import { subagentModel } from "../engine.js";
 import type { TurnRecord } from "./loop.js";
@@ -258,7 +259,7 @@ export class ClaudeSession {
     const system = buildSystemPrompt(root, stats, skillsIndex(root)) +
       `\n\n# Nesta sessão\nAs tools do Brito chegam com o prefixo \`${MCP_PREFIX}\` (ex.: ${MCP_PREFIX}graph_context). Use-as como descrito acima. ` +
       `read_file/grep/glob/edit_file/bash correspondem a Read/Grep/Glob/Edit/Bash, e \`delegate\` corresponde à tool Agent/Task com os subagentes configurados (explore, plan, general e os do projeto).` +
-      (orch.on ? ORCH_NOTE + ORCH_NOTE_CLAUDE : "");
+      (orch.on ? orchNoteFor(profileFor(root)) + ORCH_NOTE_CLAUDE : "");
     const args = [
       "-p", text,
       this.started ? "--resume" : "--session-id", this.id,

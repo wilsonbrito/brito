@@ -5,6 +5,7 @@ import { resolveModel, SLM_MODEL } from "./provider/resolve.js";
 import { slmReadySync } from "./local/slm.js";
 import { ENDPOINT_KEY_ENV } from "./endpoint.js";
 import type { AgentDef } from "./agent/agents.js";
+import { PROFILE_ENV, profileState, type Profile } from "./profile.js";
 
 // Modo orquestrador: o modelo principal (Claude) planeja e revisa; um perfil de endpoint (o qwen) implementa cada task
 // pela tool `implement`. Estado global da sessão, como o `perms`.
@@ -84,7 +85,7 @@ export const orchEnv = (): Record<string, string> => {
   if (!orch.on) return {};
   // a chave do endpoint vai só ao servidor MCP (que roda o implementador), não ao ambiente do claude e dos comandos dele
   const key = process.env[ENDPOINT_KEY_ENV];
-  return { [ORCH_ENV]: "1", BRITO_IMPL_MODEL: orch.model, ...(key ? { [ENDPOINT_KEY_ENV]: key } : {}) };
+  return { [ORCH_ENV]: "1", BRITO_IMPL_MODEL: orch.model, ...(profileState.setting !== "auto" ? { [PROFILE_ENV]: profileState.setting } : {}), ...(key ? { [ENDPOINT_KEY_ENV]: key } : {}) };
 };
 
 /** Uma task do implementador leva minutos: o timeout padrão do claude CLI para tools MCP cortaria no meio (30 min). */
@@ -149,3 +150,50 @@ export const IMPLEMENTER: AgentDef = {
   prompt: IMPLEMENTER_PROMPT,
   source: "builtin",
 };
+
+// ------------------------------------------------------------------ perfil de texto (projetos de escrita, sem código)
+
+/** Nota do orquestrador para projetos de texto: o Claude estrutura e revisa, o modelo local redige, e as citações são conferidas por código. */
+export const ORCH_NOTE_TEXT = `
+
+# MODO ORQUESTRADOR ATIVO (projeto de texto)
+Você planeja e revisa; quem redige é outro modelo, pela tool implement. Você não tem write_file nem edit_file: sua única escrita é spec_save, que grava em spec/<feature>/.
+- Antes de delegar, grave com spec_save (feature = slug curto do pedido):
+  - spec.md: tese ou objetivo, público, fontes do projeto que devem sustentar o texto (caminhos), estrutura em seções e o que fica de fora;
+  - tasks.md: uma task por seção ou arquivo, como checklist (\`- [ ] 1. título\`), cada uma com objetivo, arquivo de saída e fontes a usar.
+  Mostre os dois caminhos e um resumo, e peça aprovação antes de delegar.
+- Cada chamada de implement é UM arquivo ou seção. O redator não vê esta conversa: traga objetivo, arquivo de saída, as fontes (caminhos; para livros longos, peça que use a tool digest) que ele deve ler e usar, tom e estilo, e o que ele NÃO pode afirmar sem fonte. Passe os arquivos em \`files\`; não passe \`verify\` de código.
+- A tool confere as citações por código: todo trecho entre aspas ou em bloco \`>\` precisa existir literalmente em alguma fonte do projeto, e os que não existem aparecem como NÃO encontrados.
+- Julgue pelo texto entregue (leia o arquivo) e pela conferência de citações, não pelo relato. Citação não encontrada: peça para corrigir ou remover, ou confira você mesmo na fonte.
+- Se a seção ficou fraca, chame implement de novo com o que está errado. No máximo 2 reenvios por task; depois explique ao usuário o que falta.
+- Marque cada task como feita no tasks.md (\`- [x]\`) com spec_save quando passar na sua revisão. Ao final, resuma o que foi escrito, o que a conferência provou e o que ficou pendente.`;
+
+/** Prompt do redator (subagente) nos projetos de texto. */
+const IMPLEMENTER_PROMPT_TEXT = `Você redige UMA seção ou arquivo de texto, descrito no pedido. Você não vê a conversa do orquestrador: tudo que precisa está no pedido.
+
+# Escopo
+- Escreva só o que a task pede, no arquivo indicado. Não reescreva nem "melhore" outros arquivos.
+- Use SOMENTE o que as fontes do projeto indicadas sustentam. Não invente fato, autor, obra, página, versículo ou citação. Se as fontes não cobrem algo, diga em PENDENTE em vez de preencher.
+
+# Como trabalhar
+- Leia as fontes citadas no pedido (read_file, grep, graph_notes_*) antes de escrever. Para achar notas relacionadas use o grafo de notas (graph_notes_*).
+- Livros e textos longos (centenas de KB, como os de Textos/) NÃO se leem inteiros: use a tool digest com o objetivo da pesquisa para localizar os trechos e depois confirme o trecho exato (grep ou read_file nas linhas apontadas) antes de citá-lo.
+- Para citar, COPIE o trecho literalmente da fonte, entre aspas ou em bloco (>), e indique o arquivo de origem. Nunca parafraseie dentro de aspas.
+- Siga o estilo, os títulos e o frontmatter de arquivos parecidos que já existem no projeto.
+
+# Verificação
+- Não há testes. Releia o texto e confira cada citação contra a fonte; remova a que não conseguir confirmar. O orquestrador também confere as citações por código.
+
+# Resposta final
+Responda só com:
+FEITO: arquivos criados ou alterados, um por linha
+CONFERÊNCIA: quantas citações usou e se confirmou cada uma na fonte
+PENDENTE: o que faltou (fonte ausente, ponto que não conseguiu sustentar), ou "nada"`;
+
+/** Nota do orquestrador conforme o perfil do projeto. */
+export const orchNoteFor = (profile: Profile): string => (profile === "text" ? ORCH_NOTE_TEXT : ORCH_NOTE);
+
+/** O implementador com o prompt do perfil. */
+export function implementerFor(profile: Profile): AgentDef {
+  return profile === "text" ? { ...IMPLEMENTER, model: orch.model, name: "writer", description: "Redige uma seção de texto a partir das fontes do projeto.", prompt: IMPLEMENTER_PROMPT_TEXT } : IMPLEMENTER;
+}

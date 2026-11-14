@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { buildCorpus, findQuote, retrieve } from "../src/qatree/corpus.js";
 import { confidences, evolve, fitnessOf, groundingOf } from "../src/qatree/engine.js";
-import { demoOracle, extractJson, llmOracle } from "../src/qatree/oracle.js";
+import { demoOracle, extractJson, modelOracle } from "../src/qatree/oracle.js";
 import type { Oracle } from "../src/qatree/types.js";
 
 function project() {
@@ -90,12 +90,56 @@ test("evolve: desafio que contradiz derruba a resposta; a que resiste sobe", asy
   assert.equal(t.ranking[0].text.startsWith("A renovação"), true);
 });
 
-test("llmOracle: lê JSON dentro de cercas, mapeia posições e tolera lixo", async () => {
+test("modelOracle: lê JSON dentro de cercas, mapeia posições e tolera lixo", async () => {
   assert.deepEqual(extractJson('claro!\n```json\n{"a":1}\n```'), { a: 1 });
   assert.equal(extractJson("sem json"), null);
-  const o = llmOracle(async (_s, u) => u.includes("SUSTENTA") ? '{"posicao":"contradiz"}' : u.includes("Escreva") ? '{"perguntas":["a?","b?","c?"]}' : '{"respostas":[{"texto":"x","citacoes":[{"arquivo":"f.md","trecho":"abc"}]}]}');
+  const fake = async (_s: string, u: string) => u.includes("SUSTENTA") ? '{"posicao":"contradiz"}' : u.includes("Escreva") ? '{"perguntas":["a?","b?","c?"]}' : '{"respostas":[{"texto":"x","citacoes":[{"arquivo":"f.md","trecho":"abc"}]}]}';
+  const o = modelOracle({ research: { run: fake, kind: "slm" }, judge: { run: fake, kind: "claude" } });
   assert.equal(await o.judge("p", "q", "r"), "contradict");
   assert.deepEqual(await o.ask("q", "a", 2), ["a?", "b?"]);
   assert.deepEqual(await o.answer("q", [], 3, []), [{ text: "x", quotes: [{ file: "f.md", quote: "abc" }] }]);
-  assert.deepEqual(await llmOracle(async () => "lixo").answer("q", [], 2, []), []);
+  assert.deepEqual(await modelOracle({ research: { run: async () => "lixo", kind: "slm" }, judge: { run: async () => "lixo", kind: "claude" } }).answer("q", [], 2, []), []);
+});
+
+test("modelOracle: answer/ask vão para o executor de pesquisa; judge para o de julgamento, com schema", async () => {
+  const seen: string[] = [];
+  const o = modelOracle({
+    research: { kind: "slm", run: async (_s, _u, _m, schema) => { seen.push("research:" + Object.keys((schema as any).properties)[0]); return '{"perguntas":["a?"],"respostas":[]}'; } },
+    judge: { kind: "claude", run: async (_s, _u, _m, schema) => { seen.push("judge:" + Object.keys((schema as any).properties)[0]); return '{"posicao":"sustenta"}'; } },
+  });
+  await o.answer("q", [], 1, []); await o.ask("q", "a", 1);
+  assert.equal(await o.judge("p", "q", "r"), "support");
+  assert.deepEqual(seen, ["research:respostas", "research:perguntas", "judge:posicao"]);
+  const u = o.usage!();
+  assert.equal(u.slm.calls, 2); assert.equal(u.claude.calls, 1);
+  assert.ok(u.slm.tokensIn > 0 && u.slm.tokensOut > 0 && u.claude.tokensIn > 0);
+});
+
+test("síntese final: roda no fim com as sobreviventes, no executor certo, e vai para o snapshot", async () => {
+  const { dir, files } = project();
+  const calls: string[] = [];
+  const base = demoOracle();
+  const o = modelOracle({
+    research: { kind: "slm", run: async (_s, u) => { calls.push("r"); return u.includes("Escreva") ? '{"perguntas":["x?"]}' : JSON.stringify({ respostas: [{ texto: "O cache expira em trinta minutos", citacoes: [{ arquivo: "cache.md", trecho: "O cache de sessão expira depois de trinta minutos sem uso" }] }] }); } },
+    judge: { kind: "claude", run: async (_s, u) => { calls.push(u.includes("RESPOSTA FINAL") ? "synth" : "judge"); return u.includes("RESPOSTA FINAL") ? "Expira em 30 min [cache.md]." : '{"posicao":"sustenta"}'; } },
+  });
+  assert.ok(base.synthesize);
+  const t = await evolve("Quando o cache expira?", buildCorpus(dir, files), o, { gens: 2 });
+  assert.equal(t.final, "Expira em 30 min [cache.md].");
+  assert.equal(calls.filter((c) => c === "synth").length, 1);
+  assert.equal(calls.at(-1), "synth");
+  assert.ok(t.usage!.claude.calls >= 2 && t.usage!.slm.calls >= 2);
+  const ac = new AbortController(); ac.abort();
+  assert.equal((await evolve("cache", buildCorpus(dir, files), o, {}, () => {}, ac.signal)).final, undefined);
+});
+
+test("estimativa: demo não gasta; híbrido põe o SLM na pesquisa e o Claude no resto; o orçamento limita", async () => {
+  const { estimateTree } = await import("../src/qatree/estimate.js");
+  const d = estimateTree("demo");
+  assert.equal(d.claude.tokensIn + d.slm.tokensIn, 0);
+  const h = estimateTree("hybrid"), c = estimateTree("claude"), s = estimateTree("slm");
+  assert.ok(h.slm.tokensIn > 0 && h.claude.tokensIn > 0 && h.claude.tokensIn < c.claude.tokensIn);
+  assert.equal(s.claude.tokensIn, 0);
+  assert.ok(estimateTree("claude", { gens: 3, maxCalls: 10 }).calls <= 11);
+  assert.ok(estimateTree("claude", { gens: 3 }).calls > estimateTree("claude", { gens: 2 }).calls);
 });

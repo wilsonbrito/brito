@@ -14,7 +14,7 @@ import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { latestSession, listSessions, repairHistory, saveSession, titleOf, type SavedSession } from "./agent/sessions.js";
 import { PLAN_NOTE, perms } from "./permissions.js";
-import { ORCH_NOTE, implStatus, mainTools, orch, orchGuard, restoreOrch } from "./orchestrator.js";
+import { orchNoteFor, implStatus, mainTools, orch, orchGuard, restoreOrch } from "./orchestrator.js";
 import { loadProjectAgents, listAgents } from "./agent/agents.js";
 import { GraphLockedError, GraphStore, openGraphAfterClaude } from "./graph/store.js";
 import { indexProject } from "./graph/indexer.js";
@@ -40,6 +40,7 @@ import { pullModel, removeModel, slmStatus, withSlm } from "./local/slm.js";
 import { slmStatsLine } from "./local/stats.js";
 import { shadowRoute, readRoutes } from "./route/log.js";
 import { renderRouteStats } from "./route/stats.js";
+import { profileFor } from "./profile.js";
 import { routeEnabled } from "./route/decide.js";
 import { usageCommand } from "./usage/command.js";
 import type { TurnRecord } from "./agent/loop.js";
@@ -594,7 +595,7 @@ async function buildApiBackend(root: string, model: string, io: { ask: (q: strin
   // um system estável mantém o cache de prompt da conversa (veja memoSystem).
   const system = memoSystem(
     () => systemKey(root, perms.mode === "plan", symCount + noteCount === 0) + `|${orch.on}`,
-    () => buildSystemPrompt(root, graphStatsLine(symCount, noteCount, "now"), skillsIndex(root)) + (perms.mode === "plan" ? PLAN_NOTE : "") + (orch.on ? ORCH_NOTE : ""),
+    () => buildSystemPrompt(root, graphStatsLine(symCount, noteCount, "now"), skillsIndex(root)) + (perms.mode === "plan" ? PLAN_NOTE : "") + (orch.on ? orchNoteFor(profileFor(root)) : ""),
   );
   const agent = new Agent(system, ctx, { model, fallback, tools: mainTools });
   if (o.messages) agent.messages = o.messages;

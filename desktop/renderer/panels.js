@@ -234,7 +234,7 @@ async function settingsView(s) {
   if (l) lc.append(txt("div", "", `${l.calls} chamadas  · ↑${fmtTok(l.tokensIn)}  ↓${fmtTok(l.tokensOut)} (estimado)`),
     txt("div", "sub2", `${(l.ms / 1000).toFixed(1)}s de processamento${l.tokensSaved ? ` · ~${fmtTok(l.tokensSaved)} tokens poupados do Claude na compactação` : ""}`));
   else lc.append(txt("div", "sub2", "Não usado nesta sessão."));
-  out.push(lc, ...endpointView(s), btn("Atualizar", refreshPanel));
+  out.push(lc, ...hybridView(s, d), ...endpointView(s), btn("Atualizar", refreshPanel));
   return out;
 }
 
@@ -294,3 +294,49 @@ $("panel-x").onclick = closePanel;
 setTimeout(() => checkUpdate(false).catch(() => {}), 4000);
 $("panel-q").addEventListener("input", () => { clearTimeout(panelTimer); panelTimer = setTimeout(refreshPanel, 250); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && panelId) closePanel(); });
+
+// ---------- Modo Híbrido: medição e ajustes avançados ----------
+const JUDGE_DEFAULT = { on: true, model: "haiku", threshold: 7, rounds: 2 };
+const secs = (ms) => (ms / 1000).toFixed(1).replace(".", ",") + " s";
+
+/** Mudança do Avançado: guarda na sessão (vai junto das demais configurações), avisa o backend e atualiza o rótulo do modo. */
+function setHybrid(s, patch) {
+  if (patch.judge) s.settings.judge = { ...JUDGE_DEFAULT, ...(s.settings.judge ?? {}), ...patch.judge };
+  if (patch.profile) s.settings.profile = patch.profile;
+  state.settings = { ...s.settings };
+  if (runtime(s.id).backend === "on") api.write(s.id, { t: "config", ...patch });
+  persist(); renderTop();
+}
+
+function hybridView(s, d) {
+  const h = d.hybrid, set = s.settings, j = { ...JUDGE_DEFAULT, ...(set.judge ?? {}) };
+  const out = [txt("div", "sec2", "MODO HÍBRIDO (SLM LOCAL + CLAUDE)")];
+  const m = el("div", "card2");
+  const answered = h ? h.local + h.escalated + h.claudeRouted : 0;
+  if (!h || !answered) m.append(txt("div", "sub2", set.work === "hybrid" ? "Nenhum pedido passou pelo roteador nesta sessão ainda." : "Desligado. Ative “Híbrido” no seletor do campo de mensagem para o SLM local atender o que for simples."));
+  else {
+    const avg = (ms, n) => (n ? secs(ms / n) : "—");
+    m.append(
+      txt("div", "", `${h.local} respondida${h.local === 1 ? "" : "s"} no modelo local · ${h.escalated} escalada${h.escalated === 1 ? "" : "s"} ao Claude depois de tentar · ${h.claudeRouted} direto ao Claude`),
+      txt("div", "sub2", `Tokens do Claude evitados: ~${fmtTok(h.avoidedTokens)} (estimativa: só o pedido e a resposta, sem o contexto da conversa)`),
+      txt("div", "sub2", `Juiz: ${h.judgeCalls} chamada${h.judgeCalls === 1 ? "" : "s"}, ${h.rounds} rodada${h.rounds === 1 ? "" : "s"} de refinamento, ~${fmtTok(h.judgeTokensIn)} entrada / ~${fmtTok(h.judgeTokensOut)} saída no ${j.model}`),
+      txt("div", "sub2", `Latência: resposta local ${avg(h.localMs, h.local)} em média (inclui o juiz) · roteador ${avg(h.routerMs, h.routerCalls)} · turno no Claude ${avg(h.claudeMs, h.claudeTurns)} (${h.claudeTurns} turno${h.claudeTurns === 1 ? "" : "s"})`),
+    );
+  }
+  out.push(m);
+
+  const adv = el("div", "card2 adv");
+  adv.append(txt("div", "", "Avançado"));
+  const row = (label, node, hint) => { const r = el("div", "qt-row"); r.append(txt("span", "sub2", label), node); if (hint) r.title = hint; adv.append(r); return node; };
+  const select = (opts, value, onch) => { const x = el("select"); for (const [v, l] of opts) { const o = el("option"); o.value = v; o.textContent = l; x.append(o); } x.value = value; x.onchange = () => onch(x.value); return x; };
+  const num = (value, lo, hi, onch) => { const x = el("input"); x.type = "number"; x.min = lo; x.max = hi; x.value = value; x.style.width = "64px"; x.onchange = () => { const v = Math.min(hi, Math.max(lo, Math.round(+x.value || lo))); x.value = v; onch(v); }; return x; };
+  row("Tipo do projeto", select([["auto", `Automático (detectado: ${h?.profileNow === "text" ? "texto" : "código"})`], ["code", "Código (tasks e testes)"], ["text", "Texto (seções e citações conferidas)"]], set.profile ?? "auto", (v) => setHybrid(s, { profile: v })),
+    "Texto: o redator local escreve seções e as citações são conferidas por código contra as fontes do projeto.");
+  const chk = el("input"); chk.type = "checkbox"; chk.checked = j.on; chk.onchange = () => setHybrid(s, { judge: { on: chk.checked } });
+  row("Juiz valida respostas locais", chk, "Sem o juiz, nenhuma resposta local é entregue: tudo vai ao Claude.");
+  row("Modelo do juiz", select([["haiku", "Haiku (barato)"], ["sonnet", "Sonnet"], ["opus", "Opus"]], j.model, (v) => setHybrid(s, { judge: { model: v } })));
+  row("Nota mínima (1–10)", num(j.threshold, 1, 10, (v) => setHybrid(s, { judge: { threshold: v } })), "Abaixo disso, o Qwen reescreve com o feedback do juiz.");
+  row("Rodadas de refinamento (0–4)", num(j.rounds, 0, 4, (v) => setHybrid(s, { judge: { rounds: v } })), "Esgotadas as rodadas, o pedido vai ao Claude com o melhor rascunho e a crítica.");
+  out.push(adv);
+  return out;
+}

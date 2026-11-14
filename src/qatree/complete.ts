@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import os from "node:os";
 import { providerFor } from "../provider/index.js";
 import { claudeCommand } from "../util/platform.js";
+import { slmGenerate } from "../local/slm.js";
 import type { Complete } from "./oracle.js";
 
 /** Chamada única (sem tools, sem raciocínio) pela API/endpoint do modelo escolhido. */
@@ -32,4 +33,9 @@ export function cliComplete(model: string, signal?: AbortSignal): Complete {
     });
     child.stdin.end(user);
   });
+}
+
+/** SLM local (Qwen): com `schema`, a saída vem como JSON válido por gramática, mesmo num modelo pequeno. */
+export function slmComplete(signal?: AbortSignal): Complete {
+  return (system, user, maxTokens, schema) => slmGenerate({ system, user, schema, maxTokens: Math.min(maxTokens, 1800), signal });
 }

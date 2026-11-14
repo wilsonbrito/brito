@@ -48,9 +48,14 @@
               <option value="sonnet">Sonnet</option>
               <option value="haiku">Haiku</option>
             </select>
+            <select id="work" title="Quem faz o trabalho. Claude: tudo no Claude. Híbrido: o Claude planeja e revisa e o modelo local (Qwen3-4B nativo) faz o trabalho de volume, sem gastar tokens (precisa ter rodado brito slm pull).">
+              <option value="claude">Claude</option>
+              <option value="hybrid">Híbrido</option>
+              <option value="local" disabled>Local (em breve)</option>
+            </select>
             <select id="orch" title="Quem escreve o código. O modelo escolhido sempre planeja e revisa. Com o Qwen3-4B nativo, ele escreve o código na sua máquina, sem gastar tokens (precisa ter rodado brito slm pull).">
-              <option value="">Escreve o código: Claude (usa tokens)</option>
-              <option value="slm">Escreve o código: Qwen3-4B (nativo-brito, sem tokens)</option>
+              <option value="">Escreve: Claude (usa tokens)</option>
+              <option value="slm">Escreve: Qwen3-4B (local, sem tokens)</option>
               <option value="endpoint" hidden disabled>Escreve o código: Qwen (com chave, poupa tokens)</option>
             </select>
             <select id="effort" title="Esforço de raciocínio">

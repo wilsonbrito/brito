@@ -339,3 +339,7 @@ code.fileref:hover { background: var(--line); }
 .tv-node text { fill: var(--fg); font-size: 11px; pointer-events: none; }
 .tv-node .tv-score { fill: var(--mute); font-size: 10px; font-weight: 700; }
 .tv-node:hover rect { fill: var(--bg); }
+
+.qt-usage { margin-top: 3px; font-size: 11.5px; color: var(--mute); }
+.qt-final { margin: 10px 0; border-left: 3px solid var(--accent); }
+.qt-final-text { white-space: pre-wrap; line-height: 1.5; user-select: text; }
