@@ -20,7 +20,7 @@
     "electron": "^45.1.0",
     "jszip": "^3.10.2",
     "mermaid": "^11.17.2",
-    "pdfjs-dist": "^3.11.174",
+    "pdfjs-dist": "^6.5.438",
     "png-to-ico": "^3.0.1"
   }
 }
