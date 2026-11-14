@@ -54,7 +54,7 @@ function drawPalette() {
   list.querySelector(".on")?.scrollIntoView({ block: "nearest" });
 }
 function openPalette() { $("palette").hidden = false; $("pal-in").value = ""; pal.items = palItems(""); pal.idx = 0; drawPalette(); $("pal-in").focus(); }
-function closePalette() { $("palette").hidden = true; $("input").focus(); }
+function closePalette() { $("palette").hidden = true; composerInput.focus(); }
 function runPalette() { const it = pal.items[pal.idx]; closePalette(); it?.run(); }
 $("pal-in").addEventListener("input", (e) => { pal.items = palItems(e.target.value); pal.idx = 0; drawPalette(); });
 $("pal-in").addEventListener("keydown", (e) => {
