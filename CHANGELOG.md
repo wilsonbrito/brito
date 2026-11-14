@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Question-and-answer tree (PoC), new "Árvore" tab in the desktop app.** A question spawns several candidate answers grounded in the project's text files; the survivors spawn challenge questions, which are answered and judged against the parent answer; weak answers are pruned and a mutant answer is bred at the root each generation. Fitness = 50% grounding (every quote is verified against the source by code), 30% resistance to the challenges, 20% agreement between independent answers; confidence is a relative softmax, not a calibrated probability. "Demo" mode runs with no model and no cost; "real" mode uses the session's model (API or `claude` CLI) with a call budget. Protocol bumped to 3.
+
 ## 0.17.2 — 2026-11-14
 
 ### Added

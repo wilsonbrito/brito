@@ -2,7 +2,7 @@
  * Contrato entre o app desktop e `brito gui-serve` (JSON em linhas; stdout leva o prefixo "@@").
  * A janela compara `PROTOCOL` com o `hello` do backend e avisa se o app e a CLI estão desalinhados.
  */
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
 
 /** Janela → backend (stdin) */
 export type ClientMsg =
@@ -14,6 +14,9 @@ export type ClientMsg =
   | { t: "query"; id: string; q: "files" | "commands" | "models" | "skills" | "skill" | "agents" | "symbols" | "symbol" | "notes" | "usage"; arg?: string }
   /** ações dos painéis; a resposta é um `result` com { ok, msg } */
   | { t: "action"; id: string; op: "skill.approve" | "skill.reject" | "skill.delete" | "skill.promote" | "graph.reindex" | "note.delete"; arg?: string }
+  /** árvore de perguntas e respostas (PoC): roda em segundo plano e devolve `tree` a cada etapa */
+  | { t: "tree"; id: string; question: string; mode: "demo" | "llm"; gens?: number; breadth?: number; maxCalls?: number }
+  | { t: "treeStop" }
   | { t: "quit" };
 
 /** Backend → janela (stdout) */
@@ -31,6 +34,7 @@ export type ServerEvent =
   | { t: "approval"; id: string; text: string; force: boolean; kind: string }
   | { t: "usage"; usage: unknown; contextTokens: number; contextWindow?: number; costUsd: number; slm: { calls: number; tokensIn: number; tokensOut: number; ms: number; tokensSaved: number } | null; model: string; sessionId: string; fallback: boolean; chip: string }
   | { t: "skill"; phase: "reflecting" | "done" | "error"; notes?: string[]; pending?: number }
-  | { t: "result"; id: string; data: unknown };
+  | { t: "result"; id: string; data: unknown }
+  | { t: "tree"; id: string; snapshot: import("../qatree/types.js").TreeSnapshot };
 
 export interface CommandInfo { name: string; description: string; kind: "builtin" | "skill" }

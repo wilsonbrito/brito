@@ -1,5 +1,5 @@
 // Painéis Skills / Agentes / Grafo / Memória. Usa query/action/ensureBackend do app.js (mesmo escopo global).
-const PANELS = { skills: "Skills", agents: "Agentes", graph: "Grafo de código", memory: "Memória", files: "Arquivos", settings: "Configurações" };
+const PANELS = { skills: "Skills", agents: "Agentes", graph: "Grafo de código", memory: "Memória", files: "Arquivos", tree: "Árvore de respostas", settings: "Configurações" };
 let panelId = null, panelTimer;
 const txt = (tag, cls, s) => { const e = el(tag, cls); e.textContent = s ?? ""; return e; };
 const btn = (label, fn) => { const b = txt("button", "btn2", label); b.onclick = fn; return b; };
@@ -20,7 +20,7 @@ async function openPanel(id) {
   $("panel-tabs").textContent = PANELS[id];
   if (id === "files") renderFileTabs();
   $("panel-q").value = "";
-  $("panel-q").style.display = id === "agents" || id === "files" || id === "settings" ? "none" : "";
+  $("panel-q").style.display = id === "agents" || id === "files" || id === "settings" || id === "tree" ? "none" : "";
   $("panel-q").placeholder = id === "skills" ? "Filtrar skills…" : id === "graph" ? "Buscar símbolo…" : "Buscar notas…";
   document.querySelectorAll("#panel-btns button").forEach((b) => b.classList.toggle("on", b.dataset.panel === id));
   $("panel-body").replaceChildren(txt("div", "pmsg", "Carregando…"));
@@ -40,6 +40,7 @@ async function refreshPanel() {
     if (id === "skills") nodes = await skillsView(s, q);
     else if (id === "agents") nodes = await agentsView(s);
     else if (id === "files") nodes = pv.tab === "project" ? await projectView(s) : changedView(s);
+    else if (id === "tree") nodes = await treeView(s);
     else if (id === "settings") nodes = [...(await versionView()), ...(await settingsView(s))];
     else if (id === "graph") nodes = await graphView(s, q);
     else nodes = await memoryView(s, q);

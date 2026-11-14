@@ -319,7 +319,7 @@ function openStylePicker(p, anchor) {
 function renderAll() { applyProjectColor(); renderSidebar(); renderMessages(); renderTop(); }
 
 // ---------- backend ----------
-const PROTOCOL = 2; // igual a src/desktop/protocol.ts
+const PROTOCOL = 3; // igual a src/desktop/protocol.ts
 const note = (s, k, msg) => s.items.push({ k, msg });
 
 /** Consulta ao backend (arquivos, comandos, modelos): resposta chega como evento "result" com o mesmo id. */
@@ -356,6 +356,7 @@ function onEvent(sessionId, ev) {
   const r = runtime(sessionId);
   switch (ev.t) {
     case "hello": if (ev.protocol !== PROTOCOL) note(s, "warn", `App e CLI desalinhados (protocolo ${PROTOCOL} no app, ${ev.protocol} na CLI): rode \`npm run bundle\` ou atualize o app.`); break;
+    case "tree": onTreeEvent(sessionId, ev); return;
     case "result": { const f = pendingQ.get(ev.id); pendingQ.delete(ev.id); f?.(ev.data); return; }
     case "ready": r.backend = "on"; r.engine = ev.engine; r.model = ev.model; r.fallback = !!ev.fallback; r.chip = ev.chip; r.endpoint = ev.endpoint ?? null;
       { // o seletor "Escreve o código" reflete o que o backend realmente ligou (ele pode ter recusado) e mostra o Qwen com chave só se estiver configurado
