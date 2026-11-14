@@ -1,17 +1,30 @@
 import fs from "node:fs";
 import path from "node:path";
+import { QuoteIndex, isSource, norm, normalized, readText, registerRelease, touch, type Coverage } from "./sources.js";
 
-/** Normaliza para comparar texto: minúsculas, sem acento, só letras/números separados por espaço. */
-export const norm = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+export { norm };
 
 const STOP = new Set("de da do das dos a o as os e em um uma para por com que se na no nas nos ao aos ou como mais mas the of and to in is it for on that with as are was be this by an at from or".split(" "));
 export const tokens = (s: string) => norm(s).split(" ").filter((w) => w.length > 2 && !STOP.has(w));
 
-export interface Chunk { id: string; file: string; n: number; text: string; norm: string; tf: Map<string, number> }
-export interface Corpus { chunks: Chunk[]; df: Map<string, number>; avg: number; files: number }
+/** Bloco recuperado (o texto é materializado só para os poucos resultados de `retrieve`). */
+export interface Chunk { id: string; file: string; n: number; text: string }
+/** Bloco no índice: só metadados (o texto sai do arquivo quando precisa; o id é `${file}#${n}`). */
+export interface ChunkRef { file: string; n: number }
+export interface Corpus {
+  chunks: ChunkRef[];
+  files: number;
+  coverage: Coverage;
+  /** conferência literal de citações sobre TODAS as fontes (arquivo inteiro) */
+  quotes: QuoteIndex;
+  /** índice invertido compacto: termo → Int32Array [bloco, frequência, bloco, frequência…] */
+  postings: Map<string, Int32Array>;
+  lens: Uint32Array;
+  avg: number;
+  root: string;
+}
 
-const TEXT_EXT = new Set([".md", ".markdown", ".txt", ".rst", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".jsx", ".py", ".java", ".go", ".rb", ".php", ".cs", ".rs", ".kt", ".json", ".yml", ".yaml", ".toml", ".html", ".css"]);
-const MAX_FILE = 300_000, MAX_FILES = 400, CHUNK = 900;
+const CHUNK = 900;
 
 /** Corta em blocos de ~900 caracteres respeitando parágrafos (e quebrando linhas longas). */
 export function chunkText(text: string): string[] {
@@ -28,54 +41,89 @@ export function chunkText(text: string): string[] {
   return out.filter((c) => c.trim().length > 40);
 }
 
-/** Monta o corpus a partir de arquivos de texto do projeto (caminhos relativos a `root`). */
-export function buildCorpus(root: string, files: string[]): Corpus {
-  const chunks: Chunk[] = [];
+const built = new Map<string, { sig: string; corpus: Corpus }>();
+
+/**
+ * Monta o corpus com TODAS as fontes de texto do projeto (caminhos relativos a `root`), sem teto de arquivos nem de
+ * tamanho: um livro grande vira milhares de blocos num índice invertido compacto (o texto fica no disco). O resultado
+ * fica em cache enquanto os arquivos não mudam (data e tamanho).
+ */
+export function buildCorpus(root: string, allFiles: string[]): Corpus {
+  const files = allFiles.filter(isSource);
+  const sig = files.map((f) => {
+    try { const s = fs.statSync(path.join(root, f)); return `${f}:${s.mtimeMs}:${s.size}`; } catch { return `${f}:-`; }
+  }).join("|") + `#${allFiles.length}`;
+  const hit = built.get(root);
+  if (hit && hit.sig === sig) { touch(); return hit.corpus; }
+
+  const chunks: ChunkRef[] = [], building = new Map<string, number[]>(), lens: number[] = [];
   let used = 0;
   for (const rel of files) {
-    if (used >= MAX_FILES) break;
-    if (!TEXT_EXT.has(path.extname(rel).toLowerCase()) || rel.startsWith(".brito/") || /(^|\/)(node_modules|dist|package-lock\.json)/.test(rel)) continue;
-    let text: string | null = null;
-    try {
-      // um único descritor: tamanho e conteúdo vêm do mesmo arquivo (sem corrida entre checar e ler)
-      const fd = fs.openSync(path.join(root, rel), "r");
-      try { if (fs.fstatSync(fd).size <= MAX_FILE) text = fs.readFileSync(fd, "utf8"); } finally { fs.closeSync(fd); }
-    } catch { continue; }
-    if (text === null) continue;
+    const r = readText(root, rel);
+    if ("error" in r) continue;
     used++;
-    chunkText(text).forEach((c, i) => {
+    normalized(root, rel, r); // o mesmo texto já lido alimenta a conferência de citações (sem ler de novo)
+    chunkText(r.text).forEach((c, i) => {
+      const idx = chunks.length;
+      chunks.push({ file: rel, n: i + 1 });
       const tf = new Map<string, number>();
-      for (const w of tokens(c)) tf.set(w, (tf.get(w) ?? 0) + 1);
-      chunks.push({ id: `${rel}#${i + 1}`, file: rel, n: i + 1, text: c, norm: norm(c), tf });
+      let len = 0;
+      for (const w of tokens(c)) { tf.set(w, (tf.get(w) ?? 0) + 1); len++; }
+      lens.push(len);
+      for (const [w, f] of tf) { const p = building.get(w); if (p) p.push(idx, f); else building.set(w, [idx, f]); }
     });
   }
-  const df = new Map<string, number>();
-  for (const c of chunks) for (const w of c.tf.keys()) df.set(w, (df.get(w) ?? 0) + 1);
-  const avg = chunks.reduce((a, c) => a + c.norm.length, 0) / (chunks.length || 1);
-  return { chunks, df, avg, files: used };
+  const postings = new Map<string, Int32Array>();
+  for (const [w, p] of building) postings.set(w, Int32Array.from(p));
+  const quotes = new QuoteIndex(root, allFiles.filter(isSource), allFiles);
+  const corpus: Corpus = { chunks, files: used, coverage: quotes.coverage(), quotes, postings, lens: Uint32Array.from(lens), avg: lens.reduce((a, x) => a + x, 0) / (lens.length || 1), root };
+  built.set(root, { sig, corpus });
+  recent.clear();
+  touch();
+  return corpus;
 }
 
-/** BM25 simples. `exclude` tira blocos já usados (para as respostas candidatas olharem evidências diferentes). */
+/** Últimos arquivos relidos para materializar blocos (um livro é fatiado uma vez por consulta, não por resultado). */
+const recent = new Map<string, string[]>();
+registerRelease(() => { built.clear(); recent.clear(); });
+function chunksOf(root: string, rel: string): string[] {
+  const key = path.join(root, rel);
+  const hit = recent.get(key);
+  if (hit) return hit;
+  const r = readText(root, rel);
+  const list = "error" in r ? [] : chunkText(r.text);
+  recent.set(key, list);
+  if (recent.size > 6) recent.delete(recent.keys().next().value as string);
+  return list;
+}
+
+/** BM25. `exclude` tira blocos já usados (para as respostas candidatas olharem evidências diferentes). */
 export function retrieve(corpus: Corpus, query: string, k = 4, exclude: Set<string> = new Set()): Chunk[] {
+  touch();
   const q = [...new Set(tokens(query))];
   const N = corpus.chunks.length;
-  const scored = corpus.chunks.filter((c) => !exclude.has(c.id)).map((c) => {
-    let s = 0;
-    for (const w of q) {
-      const f = c.tf.get(w);
-      if (!f) continue;
-      const idf = Math.log(1 + (N - (corpus.df.get(w) ?? 0) + 0.5) / ((corpus.df.get(w) ?? 0) + 0.5));
-      s += idf * ((f * 2.2) / (f + 1.2 * (0.25 + 0.75 * (c.norm.length / corpus.avg))));
+  const score = new Float64Array(N);
+  for (const w of q) {
+    const p = corpus.postings.get(w);
+    if (!p) continue;
+    const df = p.length >> 1;
+    const idf = Math.log(1 + (N - df + 0.5) / (df + 0.5));
+    for (let i = 0; i < p.length; i += 2) {
+      const f = p[i + 1], len = corpus.lens[p[i]];
+      score[p[i]] += idf * ((f * 2.2) / (f + 1.2 * (0.25 + 0.75 * (len / corpus.avg))));
     }
-    return { c, s };
-  });
-  return scored.filter((x) => x.s > 0).sort((a, b) => b.s - a.s).slice(0, k).map((x) => x.c);
+  }
+  const top: number[] = [];
+  for (let i = 0; i < N; i++) if (score[i] > 0 && !(exclude.size && exclude.has(`${corpus.chunks[i].file}#${corpus.chunks[i].n}`))) top.push(i);
+  top.sort((a, b) => score[b] - score[a]);
+  return top.slice(0, k).map((i) => {
+    const ref = corpus.chunks[i];
+    return { id: `${ref.file}#${ref.n}`, ...ref, text: chunksOf(corpus.root, ref.file)[ref.n - 1] ?? "" };
+  }).filter((c) => c.text);
 }
 
-/** A citação existe, literalmente (ignorando acento/caixa/pontuação), em algum bloco do corpus? Devolve o arquivo. */
+/** A citação existe, literalmente (ignorando acento/caixa/pontuação/quebra de linha), em alguma fonte? Devolve o arquivo. */
 export function findQuote(corpus: Corpus, quote: string): { file: string; chunk: string } | null {
-  const q = norm(quote);
-  if (q.length < 12) return null;
-  const hit = corpus.chunks.find((c) => c.norm.includes(q));
-  return hit ? { file: hit.file, chunk: hit.id } : null;
+  const hit = corpus.quotes.find(quote);
+  return hit ? { file: hit.file, chunk: hit.file } : null;
 }

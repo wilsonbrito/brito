@@ -1,5 +1,5 @@
 import { findQuote, retrieve, tokens, type Corpus } from "./corpus.js";
-import { DEFAULT_OPTS, type Oracle, type Quote, type RankEntry, type TreeNode, type TreeOptions, type TreeSnapshot } from "./types.js";
+import { DEFAULT_OPTS, type Oracle, type Quote, type RankEntry, type Finalist, type Stance, type TreeMode, type TreeNode, type TreeOptions, type TreeSnapshot } from "./types.js";
 
 export const W = { grounding: 0.5, consistency: 0.3, agreement: 0.2 };
 export const fitnessOf = (g: number, c: number | null, a: number) => W.grounding * g + W.consistency * (c ?? 0.5) + W.agreement * a;
@@ -46,11 +46,11 @@ type QNode = TreeNode & { stance?: string };
  */
 export async function evolve(
   question: string, corpus: Corpus, oracle: Oracle, partial: Partial<TreeOptions> = {},
-  onUpdate: (s: TreeSnapshot) => void = () => {}, signal?: AbortSignal, mode: "demo" | "llm" = "demo",
+  onUpdate: (s: TreeSnapshot) => void = () => {}, signal?: AbortSignal, mode: TreeMode = "demo",
 ): Promise<TreeSnapshot> {
   const o = { ...DEFAULT_OPTS, ...partial };
   const nodes: QNode[] = [];
-  let calls = 0, phase = "iniciando", gen = 0, error: string | undefined;
+  let calls = 0, phase = "iniciando", gen = 0, error: string | undefined, answer: string | undefined;
   const add = (n: Omit<TreeNode, "id">): QNode => { const x: QNode = { ...n, id: nodes.length }; nodes.push(x); return x; };
   const kids = (id: number, kind?: "q" | "a") => nodes.filter((n) => n.parent === id && (!kind || n.kind === kind));
   const guard = () => {
@@ -65,7 +65,7 @@ export async function evolve(
     return root.map((a, i) => ({ id: a.id, text: a.text, fitness: a.fitness ?? 0, confidence: conf[i], alive: a.alive, quotes: a.quotes ?? [], grounding: a.grounding ?? 0, consistency: a.consistency ?? null, agreement: a.agreement ?? 0 }));
   };
   const snap = (done = false): TreeSnapshot => ({
-    question, phase, gen, gens: o.gens, calls, maxCalls: o.maxCalls, done, error,
+    question, phase, gen, gens: o.gens, calls, maxCalls: o.maxCalls, done, error, final: answer, usage: oracle.usage?.(),
     nodes: nodes.map((n) => ({ ...n })), ranking: rankRoot(), corpus: { files: corpus.files, chunks: corpus.chunks.length }, mode,
   });
   const emit = (done = false) => onUpdate(snap(done));
@@ -144,6 +144,19 @@ export async function evolve(
   } catch (e) {
     if (e instanceof Stop) phase = `parou: ${e.message}`;
     else { error = (e as Error)?.message ?? String(e); phase = "erro"; }
+  }
+  // síntese final: também em resultado parcial (orçamento esgotado), mas não se o usuário interrompeu nem houve erro
+  if (oracle.synthesize && !error && !signal?.aborted) {
+    const finalists: Finalist[] = kids(0, "a").filter((a) => a.alive).sort((a, b) => (b.fitness ?? 0) - (a.fitness ?? 0)).slice(0, o.keep).map((a) => ({
+      text: a.text, fitness: a.fitness ?? 0, quotes: (a.quotes ?? []).filter((q) => q.ok).map((q) => ({ file: q.file, quote: q.quote })),
+      challenges: kids(a.id, "q").map((q) => ({ question: q.text, stance: ((q as QNode).stance ?? "neutral") as Stance })),
+    }));
+    if (finalists.length) {
+      const prev = phase;
+      phase = "sintetizando a resposta final"; emit();
+      try { answer = (await oracle.synthesize(question, finalists)) || undefined; } catch (e) { if (!signal?.aborted) error = `síntese falhou: ${(e as Error)?.message ?? e}`; }
+      phase = prev;
+    }
   }
   const final = snap(true);
   onUpdate(final);

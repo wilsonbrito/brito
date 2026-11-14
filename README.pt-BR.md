@@ -10,6 +10,17 @@ O Brito é um agente para desenvolvimento de software. Use no terminal (`brito-c
 
 *Uma sessão real num pequeno projeto SvelteKit: uma pergunta, duas consultas ao grafo (0,1 s e 0,0 s) e uma resposta que já inclui os componentes `.svelte` que dependem do arquivo. A barra de status mostra o custo real do turno.*
 
+## Novidades da 0.19
+
+- **Modo Híbrido (desktop): o SLM local e o Claude trabalham juntos.** Um seletor ao lado do modelo alterna entre **Claude** e **Híbrido**. No Híbrido, o decisor de destino passa a agir: pedidos de condensar, extrair, traduzir ou reformatar um texto que veio na mensagem são respondidos pelo Qwen3-4B local (sem tokens do Claude), enquanto raciocínio, código, consultas ao projeto, mensagens com `@arquivo` e qualquer dúvida vão ao Claude. Cada mensagem mostra para onde foi. Precisa de `brito slm pull`; sem o modelo, tudo simplesmente vai ao Claude.
+- **Um juiz barato confere cada resposta local.** O Haiku dá nota de 0 a 10 à resposta do Qwen e lista os problemas; abaixo de 7 o Qwen reescreve com esse feedback (até 2 rodadas); se ainda reprovar, o pedido vai ao Claude junto com o melhor rascunho e a crítica. Sem juiz, sem veredito ou com o juiz fora do ar, nada local é entregue sem conferir. Limiar, rodadas e modelo do juiz são ajustáveis em **⚙ Configurar → Modo Híbrido → Avançado**, que também mostra tokens evitados, custo do juiz e latência (local × Claude).
+- **Projetos de texto também funcionam (cofres de notas, escrita).** O Brito detecta o tipo do projeto (ou você escolhe): num projeto de texto o orquestrador planeja seções em vez de tasks de código, o modelo local redige, e toda citação dos arquivos produzidos é conferida **por código** contra as fontes do projeto, listando as que não existem.
+- **Árvore de perguntas e respostas no chat, com resposta final.** `/arvore [--slm|--hibrido|--claude|--demo] [--gens 1-3] pergunta` roda a árvore sem sair da conversa: mostra antes uma estimativa de tokens (local = grátis, Claude = cobrado), atualiza o progresso numa linha e entrega uma resposta final com as fontes e o gasto real. Na aba da árvore, os papéis são roteados: o modelo local pesquisa e o Claude julga.
+- **Chega de teto de tamanho nas fontes.** A conferência de citações e a árvore agora leem o projeto inteiro: antes, arquivos acima de 300 KB (os livros) e tudo depois de 400 arquivos eram pulados em silêncio, e citações verdadeiras saíam como "não encontradas". O relatório também diz o que não conseguiu ler (PDF/docx sem arquivo de texto ao lado).
+- **Correção: nomes de arquivo com acento.** A listagem usava `git ls-files` sem `-z`, o que escondia todo nome acentuado (mais da metade dos arquivos de um cofre de notas em português) do `@arquivo`, da árvore e da detecção do tipo de projeto.
+
+Atualizando da 0.18: `npm i -g brito-cli@latest` e atualize o app de desktop para a mesma versão (protocolo 4: o app avisa quando ele e a CLI estão fora de sincronia). Detalhes completos no [CHANGELOG](CHANGELOG.md).
+
 ## Novidades da 0.10
 
 - **Leia o seu projeto dentro do app de desktop.** Abra o painel **Arquivos** → aba **Projeto**: árvore de pastas e um leitor de Markdown (frontmatter, tarefas, tabelas, callouts e `[[wikilinks]]` do Obsidian), código com realce e imagens. Blocos ` ```mermaid ` viram diagramas. Os caminhos que o agente cita no chat (`src/cli.ts:120`) são clicáveis. É só leitura, e só lê dentro das pastas que você adicionou como projeto.
@@ -89,7 +100,7 @@ O lint **rejeita** segredos/tokens, caminhos absolutos do usuário, credenciais 
 
 - **Fallback quando o Claude acaba**: cadeia Claude → perfil `qwen` → SLM local, com o loop completo do agente e as tools (mesmas permissões). É temporário: passada a janela (o horário de reset que o erro informa, senão 10 min, ou 60 min para cota/auth; `BRITO_FALLBACK_MINUTES` sobrepõe) o próximo turno tenta o Claude de novo. O `/fallback` mostra quando. Um modelo de 4B erra mais com tools: use para continuar, não para tarefas grandes. `BRITO_SLM_FALLBACK=off` tira o SLM da cadeia; `BRITO_SLM_CTX` define o contexto.
 - **Compactação de contexto no SLM local**: ao compactar a conversa, o meio é resumido pelo SLM local (map-reduce em fatias) em vez do Claude, poupando tokens; em qualquer falha volta ao Claude. O `/context` mostra as compactações e os tokens poupados estimados. `BRITO_SLM_COMPACT=off` desliga.
-- **Decisor de destino (modo sombra)**: o SLM local classifica cada pedido como `claude`, `slm` ou `tool` depois do turno e grava ao lado do que o turno realmente exigiu; ainda não muda nada. `/route` (ou `/route all`) mostra quanto ele delegaria e os erros caros. Registros em `~/.brito/routing/`; `BRITO_ROUTE=off` desliga.
+- **Decisor de destino (modo sombra)**: o SLM local classifica cada pedido como `claude`, `slm` ou `tool` depois do turno e grava ao lado do que o turno realmente exigiu; no **modo Híbrido** (desktop) ele agora age e responde localmente os pedidos simples, conferidos por um juiz barato (veja as Novidades da 0.19); nos demais lugares só observa. `/route` (ou `/route all`) mostra quanto ele delegaria e os erros caros. Registros em `~/.brito/routing/`; `BRITO_ROUTE=off` desliga.
 
 `BRITO_SLM=off` desliga; `BRITO_SLM_MODEL` aponta para outro GGUF (URI `hf:` ou caminho de arquivo).
 

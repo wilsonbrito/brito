@@ -35,18 +35,24 @@ import { ENDPOINT_KEY_ENV, endpointInfo, removeEndpoint, saveEndpoint } from "..
 import { SLM_MODEL, contextWindowFor, resolveModel } from "../provider/resolve.js";
 import type { Msg } from "../provider/types.js";
 import { PLAN_NOTE, perms, type PermMode } from "../permissions.js";
-import { ORCH_NOTE, implStatus, initialImplModel, mainTools, orch, orchGuard, restoreOrch } from "../orchestrator.js";
+import { orchNoteFor, implStatus, initialImplModel, mainTools, orch, orchGuard, restoreOrch } from "../orchestrator.js";
 import { getSkill, listBuiltins, listPending, listSkills, skillsIndex } from "../skills/store.js";
 import { defaultComplete, recordOutcomes, reflect, shouldReflect, type Complete } from "../skills/learn.js";
 import { claudeCliComplete } from "../skills/learn-cli.js";
 import { autoConsolidate } from "../skills/consolidate.js";
 import { expireTrials, skillsMode } from "../skills/trial.js";
-import { withSlm } from "../local/slm.js";
+import { slmDisabled, slmStatus, withSlm } from "../local/slm.js";
 import { shadowRoute } from "../route/log.js";
+import { routeStats, tryLocal, withLocalContext, type LocalExchange, type Outcome } from "../route/active.js";
 import { buildCorpus } from "../qatree/corpus.js";
 import { evolve } from "../qatree/engine.js";
-import { demoOracle, llmOracle } from "../qatree/oracle.js";
-import { apiComplete, cliComplete } from "../qatree/complete.js";
+import { isProfileSetting, profileFor, profileState } from "../profile.js";
+import { applyWork, hybrid, isCustom, setJudge, workOf, writerChoice } from "../hybrid.js";
+import { listProjectFiles } from "../projectfiles.js";
+import { estimateTree } from "../qatree/estimate.js";
+import { demoOracle, modelOracle } from "../qatree/oracle.js";
+import { apiComplete, cliComplete, slmComplete } from "../qatree/complete.js";
+import type { TreeMode } from "../qatree/types.js";
 import type { ToolContext } from "../tools/registry.js";
 
 /**
@@ -74,20 +80,7 @@ const BUILTIN_COMMANDS: CommandInfo[] = [
 let fileCache: { root: string; at: number; files: string[] } | null = null;
 function projectFiles(root: string): string[] {
   if (fileCache && fileCache.root === root && Date.now() - fileCache.at < 15000) return fileCache.files;
-  let files: string[] = [];
-  try {
-    files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: root, encoding: "utf8", maxBuffer: 16 << 20, timeout: 5000 }).split("\n").filter(Boolean);
-  } catch {
-    const walk = (dir: string, depth: number) => {
-      if (depth > 4 || files.length > 5000) return;
-      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (e.name.startsWith(".") || e.name === "node_modules") continue;
-        const rel = path.relative(root, path.join(dir, e.name)).split(path.sep).join("/");
-        e.isDirectory() ? walk(path.join(dir, e.name), depth + 1) : files.push(rel);
-      }
-    };
-    try { walk(root, 0); } catch { /* pasta ilegível */ }
-  }
+  const files = listProjectFiles(root); // com -z: nomes com acento saem inteiros (src/projectfiles.ts)
   fileCache = { root, at: Date.now(), files };
   return files;
 }
@@ -230,8 +223,8 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
     const ctx: ToolContext = { root, graph, ask, sync, dirty: false, loadedSkills: o.loadedSkills ?? new Set(), model: () => agent.model };
     const fallback = o.fallback ?? newFallbackState(model);
     const system = memoSystem(
-      () => systemKey(root, perms.mode === "plan", syms + notes === 0) + `|${orch.on}`,
-      () => buildSystemPrompt(root, graphStatsLine(syms, notes, "now"), skillsIndex(root)) + (perms.mode === "plan" ? PLAN_NOTE : "") + (orch.on ? ORCH_NOTE : ""),
+      () => systemKey(root, perms.mode === "plan", syms + notes === 0) + `|${orch.on}|${orch.on ? profileFor(root) : ""}`,
+      () => buildSystemPrompt(root, graphStatsLine(syms, notes, "now"), skillsIndex(root)) + (perms.mode === "plan" ? PLAN_NOTE : "") + (orch.on ? orchNoteFor(profileFor(root)) : ""),
     );
     const agent = new Agent(system, ctx, { model, sink, fallback, tools: mainTools });
     if (o.messages) agent.messages = o.messages;
@@ -368,14 +361,19 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
 
   let busy = false;
   restoreOrch(engine.model, (m) => emit({ t: "warn", msg: m }), (m) => emit({ t: "info", msg: m }));
+  if (orch.on) { hybrid.on = true; hybrid.writer = orch.model === SLM_MODEL ? "slm" : "endpoint"; } // orquestrador salvo = híbrido ligado
   const panels = new Panels(root, graphRootFor(root), isHome);
   // Perfil de endpoint (Qwen com chave): só aparece no seletor depois de configurado.
   const endpointName = () => { const m = initialImplModel(); return m === SLM_MODEL ? "qwen" : m; };
-  const orchMode = () => (!orch.on ? "" : orch.model === SLM_MODEL ? "slm" : "endpoint");
-  const ready =() => emit({ t: "ready", engine: engine.kind, sessionId: engine.sessionId, model: engine.model, effort: engine.effort, mode: perms.mode, orch: orch.on, orchMode: orchMode(), endpointReady: implStatus(engine.model, endpointName(), process.env).ready, endpoint: endpointInfo(), symbols: syms, notes, root, fallback: engine.fallback.active, chip: chipOf(engine.model, engine.fallback) });
+  const orchMode = () => writerChoice();
+  const ready =() => emit({ t: "ready", engine: engine.kind, sessionId: engine.sessionId, model: engine.model, effort: engine.effort, mode: perms.mode, orch: orch.on, orchMode: orchMode(), work: workOf(), custom: isCustom(), endpointReady: implStatus(engine.model, endpointName(), process.env).ready, endpoint: endpointInfo(), symbols: syms, notes, root, fallback: engine.fallback.active, chip: chipOf(engine.model, engine.fallback) });
   ready();
 
   let treeRun: AbortController | null = null;
+  let localRun: AbortController | null = null;
+  /** medição do Híbrido para o painel: contadores da sessão + configuração em vigor */
+  const hybridInfo = () => ({ on: hybrid.on, ...routeStats, judge: hybrid.judge, profile: profileState.setting, profileNow: profileFor(root), writer: hybrid.writer });
+  const localLog: LocalExchange[] = []; // trocas respondidas pelo SLM que o Claude ainda não viu
   const rl = readline.createInterface({ input: process.stdin });
   const quit = async () => { closeApproval(); try { await panels.close(); await engine.close(); } catch { /* saindo */ } process.exit(0); };
   rl.on("close", quit);
@@ -403,10 +401,34 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
         busy = true;
         try {
           if (cmd === "/learn") await engine.learn(true);
-          else { await engine.send(text); await engine.learn(); }
+          else {
+            // Híbrido: o decisor de destino pode mandar o pedido ao SLM local (sem tokens do Claude); na dúvida vai ao Claude
+            let routed: Outcome | null = null;
+            if (hybrid.on && !sk) {
+              localRun = new AbortController();
+              const j = hybrid.judge;
+              const judge = j.on ? (engine.kind === "api" ? apiComplete(MODEL_ALIASES[j.model] ?? j.model, localRun.signal) : cliComplete(j.model, localRun.signal)) : null;
+              routed = await tryLocal(String(m.text ?? ""), { on: true, signal: localRun.signal, judge, threshold: j.threshold, rounds: j.rounds });
+              localRun = null;
+            }
+            if (routed?.handled) {
+              const rv = routed.rounds ? ` em ${routed.rounds} rodada${routed.rounds === 1 ? "" : "s"}` : "";
+              emit({ t: "route", to: "slm", ms: routed.ms, text: `↳ respondido pelo modelo local (Qwen3-4B, ${(routed.ms / 1000).toFixed(1)} s) · revisado pelo juiz: nota ${routed.score}/10${rv}` });
+              sink.turnStart(); sink.text(routed.answer); sink.textEnd(); sink.turnEnd(true);
+              localLog.push({ question: String(m.text ?? ""), answer: routed.answer });
+            } else {
+              if (routed?.decision) { if (routed.route !== "slm") routeStats.claudeRouted++; emit({ t: "route", to: "claude", ms: routed.decision.ms, text: `↳ roteado para o Claude (${routed.why})` }); }
+              const out = withLocalContext(text, localLog, routed && !routed.handled ? routed.draft : null);
+              localLog.length = 0;
+              const tc = Date.now();
+              await engine.send(out);
+              if (hybrid.on) { routeStats.claudeTurns++; routeStats.claudeMs += Date.now() - tc; }
+              await engine.learn();
+            }
+          }
         } finally {
           busy = false;
-          emit({ t: "usage", ...engine.stats(), slm: slmUsage(), model: engine.model, sessionId: engine.sessionId, fallback: engine.fallback.active, chip: chipOf(engine.model, engine.fallback) });
+          emit({ t: "usage", ...engine.stats(), slm: slmUsage(), hybrid: hybridInfo(), model: engine.model, sessionId: engine.sessionId, fallback: engine.fallback.active, chip: chipOf(engine.model, engine.fallback) });
         }
         break;
       }
@@ -418,15 +440,29 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
         const id = String(m.id);
         void (async () => {
           const question = String(m.question ?? "").trim();
-          const mode: "demo" | "llm" = m.mode === "llm" ? "llm" : "demo";
+          const asked = (["auto", "slm", "hybrid", "claude"] as const).find((x) => x === m.mode);
+          let mode: TreeMode = asked && asked !== "auto" ? asked : "demo";
           const clamp = (v: unknown, lo: number, hi: number, d: number) => Math.min(hi, Math.max(lo, Number.isFinite(Number(v)) ? Math.floor(Number(v)) : d));
           try {
             if (!question) throw new Error("escreva uma pergunta");
+            if (asked === "auto") mode = !slmDisabled() && (await slmStatus()).ready ? "hybrid" : "claude"; // híbrido quando o SLM está pronto
+            // a primeira indexação de um projeto grande leva alguns segundos (depois fica em cache): avisa antes de bloquear
+            emit({ t: "tree", id, snapshot: { question, phase: "indexando as fontes do projeto (na primeira vez pode levar alguns segundos)", gen: 0, gens: 0, calls: 0, maxCalls: 0, done: false, nodes: [], ranking: [], corpus: { files: 0, chunks: 0 }, mode } });
+            await new Promise((r) => setImmediate(r));
             const corpus = buildCorpus(root, projectFiles(root));
             if (!corpus.chunks.length) throw new Error("não há arquivos de texto neste projeto para servir de fonte");
             const complete = engine.kind === "api" ? apiComplete(engine.model, ac.signal) : cliComplete(process.env.BRITO_LEARN_MODEL ?? "", ac.signal);
-            const oracle = mode === "llm" ? llmOracle(complete) : demoOracle();
-            await evolve(question, corpus, oracle, { gens: clamp(m.gens, 1, 3, 2), breadth: clamp(m.breadth, 2, 4, 3), maxCalls: clamp(m.maxCalls, 5, 120, mode === "llm" ? 40 : 80) },
+            // SLM pedido mas indisponível (não baixado/desligado): cai no Claude, com aviso visível
+            if ((mode === "slm" || mode === "hybrid") && (slmDisabled() || !(await slmStatus()).ready)) {
+              emit({ t: "warn", msg: "SLM local indisponível (rode `brito slm pull`); a árvore usou o Claude" });
+              mode = "claude";
+            }
+            const sl = { run: slmComplete(ac.signal), kind: "slm" as const }, cl = { run: complete, kind: "claude" as const };
+            const oracle = mode === "demo" ? demoOracle()
+              : modelOracle(mode === "slm" ? { research: sl, judge: sl } : mode === "hybrid" ? { research: sl, judge: cl } : { research: cl, judge: cl });
+            const opts = { gens: clamp(m.gens, 1, 3, 2), breadth: clamp(m.breadth, 2, 4, 3), maxCalls: clamp(m.maxCalls, 5, 120, mode === "demo" ? 80 : 40) };
+            if (m.chat) emit({ t: "treeEstimate", id, mode, ...estimateTree(mode, opts) });
+            await evolve(question, corpus, oracle, opts,
               (snapshot) => emit({ t: "tree", id, snapshot }), ac.signal, mode);
           } catch (e: any) {
             emit({ t: "tree", id, snapshot: { question, phase: "erro", gen: 0, gens: 0, calls: 0, maxCalls: 0, done: true, error: e?.message ?? String(e), nodes: [], ranking: [], corpus: { files: 0, chunks: 0 }, mode } });
@@ -435,7 +471,7 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
         break;
       }
       case "treeStop": treeRun?.abort(); break;
-      case "abort": engine.abort(); break;
+      case "abort": engine.abort(); treeRun?.abort(); localRun?.abort(); break;
       case "query": {
         let data: unknown = [];
         try {
@@ -451,7 +487,7 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
           else if (m.q === "commands") {
             const skills: CommandInfo[] = [...listBuiltins(root), ...listSkills(root).filter((s) => s.invoke === "manual")].map((s) => ({ name: s.name, description: s.description, kind: "skill" as const }));
             data = [...BUILTIN_COMMANDS, ...skills].filter((c) => !arg || c.name.includes(arg));
-          } else if (m.q === "usage") data = { plan: await fetchPlanUsage({ force: arg === "force" }), session: engine.stats(), slm: slmUsage(), model: engine.model };
+          } else if (m.q === "usage") data = { plan: await fetchPlanUsage({ force: arg === "force" }), session: engine.stats(), slm: slmUsage(), hybrid: hybridInfo(), model: engine.model };
           else if (m.q === "models") data = { aliases: Object.keys(MODEL_ALIASES), profiles: Object.keys(loadProfiles().profiles) };
         } catch (e: any) { sink.warn(`consulta ${m.q} falhou: ${e?.message ?? e}`); }
         emit({ t: "result", id: m.id, data });
@@ -480,17 +516,10 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
         if (typeof m.model === "string") engine.setModel(m.model ? MODEL_ALIASES[m.model] ?? m.model : ""); // vazio = modelo/perfil salvo
         if (m.effort !== undefined) engine.effort = isEffort(m.effort) ? m.effort : "";
         if (["manual", "auto", "plan", "bypass"].includes(m.mode)) perms.mode = m.mode as PermMode;
-        // "" desliga; "slm" = Qwen3-4B nativo escreve o código; "endpoint" (ou "on", antigo) = perfil com chave.
-        if (m.orch === "") orch.on = false;
-        else if (m.orch === "slm" || m.orch === "endpoint" || m.orch === "on") {
-          const impl = m.orch === "slm" ? SLM_MODEL : endpointName();
-          const s = implStatus(engine.model, impl, process.env);
-          if (s.ready) { orch.model = impl; orch.on = true; }
-          else {
-            orch.on = false;
-            sink.warn(`Não deu para usar ${m.orch === "slm" ? "o Qwen3-4B nativo" : "o Qwen com chave"} para escrever código: ${s.reason}. Quem escreve o código continua sendo o Claude (usa tokens).`);
-          }
-        }
+        // modo de trabalho (claude | hybrid) e quem escreve ("" | slm | endpoint): `orch.on` é derivado deles (src/hybrid.ts)
+        if (isProfileSetting(m.profile)) profileState.setting = m.profile;
+        if (m.judge && typeof m.judge === "object") setJudge(m.judge);
+        if (m.work !== undefined || m.orch !== undefined) applyWork({ work: m.work, orch: m.orch }, engine.model, endpointName(), (w) => sink.warn(w));
         ready();
         break;
       }

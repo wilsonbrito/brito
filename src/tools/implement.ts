@@ -2,7 +2,10 @@ import { z } from "zod";
 import { execFile } from "node:child_process";
 import { defineTool, execTool } from "./registry.js";
 import { runSubagent, type SubagentOpts } from "./delegate.js";
-import { IMPLEMENTER, implStatus, orch } from "../orchestrator.js";
+import { implStatus, implementerFor, orch } from "../orchestrator.js";
+import { listProjectFiles } from "../projectfiles.js";
+import { profileFor } from "../profile.js";
+import { checkCitations, renderCitationReport } from "../qatree/citations.js";
 import { initialModel } from "../model.js";
 
 /** Saída de um git só de leitura; fora de um repositório (ou sem git), `null`. */
@@ -36,7 +39,8 @@ defineTool({
     let full = task;
     if (files.length) full += `\n\n# Arquivos\n${files.map((f) => `- ${f}`).join("\n")}`;
     if (verify) full += `\n\n# Como verificar\n${verify}`;
-    const r = await runSubagent(IMPLEMENTER, full, focus, ctx, { maxSteps: 40, ...implementIo });
+    const profile = profileFor(ctx.root);
+    const r = await runSubagent(implementerFor(profile), full, focus, ctx, { maxSteps: 40, ...implementIo });
 
     // Fatos que não dependem do relato do implementador: o que mudou no disco e o que a verificação diz.
     const st = await git(ctx.root, ["status", "--short"]);
@@ -46,6 +50,11 @@ defineTool({
     if (verify) {
       const v = await execTool("bash", { command: verify }, ctx);
       out += `\n\n# verificação: ${verify}\n${v.isError ? `[não rodou] ${v.text}` : v.text.slice(-6_000)}`;
+    }
+    // projeto de texto: as citações dos arquivos produzidos são conferidas por código contra o resto do projeto
+    if (profile === "text" && files.length) {
+      try { out += `\n\n# conferência de citações (por código, contra as fontes do projeto)\n${renderCitationReport(checkCitations(ctx.root, listProjectFiles(ctx.root), files))}`; }
+      catch (e: any) { out += `\n\n# conferência de citações\n[não rodou] ${e?.message ?? e}`; }
     }
     return out;
   },

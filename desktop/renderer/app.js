@@ -18,7 +18,7 @@ function applyEditorMode() {
 function toggleEditorMode() { editorMode = !editorMode; applyEditorMode(); composerInput.focus(); }
 const api = window.brito;
 
-let state = { projects: [], sessions: [], activeId: null, settings: { model: "", effort: "", mode: "manual", orch: "" } };
+let state = { projects: [], sessions: [], activeId: null, settings: { model: "", effort: "", mode: "manual", orch: "", work: "claude", profile: "auto" } };
 const rt = new Map(); // sessionId → { busy, backend: "off"|"starting"|"on", usage, approvals: [] }
 const openFolds = new Set();
 let filter = "";
@@ -245,6 +245,12 @@ function renderTop() {
   $("send").title = r?.busy ? "Interromper" : editorMode ? "Enviar (Ctrl+Enter)" : "Enviar (Enter)";
   const set = s?.settings ?? state.settings;
   $("mode").value = set.mode; $("model").value = set.model; $("effort").value = set.effort; $("orch").value = set.orch ?? "";
+  { // o seletor "quem escreve" só existe com o Híbrido ligado; fora do padrão (Qwen local) o modo vira "personalizado"
+    const w = set.work === "hybrid" ? "hybrid" : "claude";
+    $("work").value = w; $("orch").hidden = w !== "hybrid";
+    const j = set.judge, custom = (set.orch ?? "") !== "slm" || (set.profile ?? "auto") !== "auto" || (j && (j.on === false || j.model !== "haiku" || j.threshold !== 7 || j.rounds !== 2));
+    $("work").options[1].textContent = w === "hybrid" && custom ? "Híbrido (personalizado)" : "Híbrido";
+  }
   const b = r?.backend ?? "off";
   const stb = $("st-backend");
   stb.replaceChildren();
@@ -278,6 +284,12 @@ function renderTop() {
     if (u.slm) {
       const e = el("span", "tok"); e.textContent = `💻 ${u.slm.calls}× ↑${fmtK(u.slm.tokensIn)} ↓${fmtK(u.slm.tokensOut)}`;
       e.title = `SLM local (sem custo): ${u.slm.calls} chamadas, ~${u.slm.tokensIn.toLocaleString("pt-BR")} tokens lidos e ~${u.slm.tokensOut.toLocaleString("pt-BR")} gerados (estimativa)`;
+      us.append(e);
+    }
+    const hy = u.hybrid;
+    if (hy && hy.local + hy.escalated + hy.claudeRouted > 0) {
+      const e = el("span", "tok"); e.textContent = `⚡ ${hy.local} local · ${hy.escalated + hy.claudeRouted} Claude`;
+      e.title = `Híbrido: ${hy.local} respondida(s) pelo modelo local (~${hy.avoidedTokens.toLocaleString("pt-BR")} tokens do Claude evitados, estimativa), ${hy.escalated} escalada(s) após o juiz reprovar, ${hy.claudeRouted} direto ao Claude. Detalhes em Configurações.`;
       us.append(e);
     }
     if (u.costUsd) { const c = el("span", "cost"); c.textContent = `$${u.costUsd.toFixed(2)}`; c.title = "Custo estimado da sessão"; us.append(c); }
@@ -319,7 +331,7 @@ function openStylePicker(p, anchor) {
 function renderAll() { applyProjectColor(); renderSidebar(); renderMessages(); renderTop(); }
 
 // ---------- backend ----------
-const PROTOCOL = 3; // igual a src/desktop/protocol.ts
+const PROTOCOL = 4; // igual a src/desktop/protocol.ts
 const note = (s, k, msg) => s.items.push({ k, msg });
 
 /** Consulta ao backend (arquivos, comandos, modelos): resposta chega como evento "result" com o mesmo id. */
@@ -357,11 +369,14 @@ function onEvent(sessionId, ev) {
   switch (ev.t) {
     case "hello": if (ev.protocol !== PROTOCOL) note(s, "warn", `App e CLI desalinhados (protocolo ${PROTOCOL} no app, ${ev.protocol} na CLI): rode \`npm run bundle\` ou atualize o app.`); break;
     case "tree": onTreeEvent(sessionId, ev); return;
+    case "treeEstimate": onTreeEstimate(sessionId, ev); return;
+    case "route": note(s, "info", ev.text); break;
     case "result": { const f = pendingQ.get(ev.id); pendingQ.delete(ev.id); f?.(ev.data); return; }
     case "ready": r.backend = "on"; r.engine = ev.engine; r.model = ev.model; r.fallback = !!ev.fallback; r.chip = ev.chip; r.endpoint = ev.endpoint ?? null;
       { // o seletor "Escreve o código" reflete o que o backend realmente ligou (ele pode ter recusado) e mostra o Qwen com chave só se estiver configurado
         const o = $("orch").querySelector('option[value="endpoint"]');
         if (o) { o.hidden = o.disabled = !ev.endpointReady; }
+        if (typeof ev.work === "string") s.settings.work = ev.work;
         if (typeof ev.orchMode === "string") { s.settings.orch = ev.orchMode; if (s.id === state.activeId) $("orch").value = ev.orchMode; }
       }
       if (s.claudeId !== ev.sessionId) s.claudeId = ev.sessionId; loadModels(sessionId); break;
@@ -388,7 +403,7 @@ function onEvent(sessionId, ev) {
     case "warn": case "error": if (ev.t === "error") s.lastError = true; note(s, ev.t, ev.msg); break;
     case "approval": r.approvals.push(ev); if (sessionId === state.activeId) showApproval(); break;
     case "turnEnd": r.busy = false; s.updated = Date.now(); if (sessionId !== state.activeId) s.unread = true; break;
-    case "usage": r.usage = { contextTokens: ev.contextTokens, costUsd: ev.costUsd, contextWindow: ev.contextWindow, tokens: ev.usage, slm: ev.slm }; r.model = ev.model; r.fallback = !!ev.fallback; r.chip = ev.chip; if (ev.sessionId) s.claudeId = ev.sessionId; break;
+    case "usage": r.usage = { contextTokens: ev.contextTokens, costUsd: ev.costUsd, contextWindow: ev.contextWindow, tokens: ev.usage, slm: ev.slm, hybrid: ev.hybrid }; r.model = ev.model; r.fallback = !!ev.fallback; r.chip = ev.chip; if (ev.sessionId) s.claudeId = ev.sessionId; break;
     case "closed": r.backend = "off"; if (r.busy || (ev.code && ev.code !== 0)) note(s, "warn", `O backend encerrou${ev.code ? ` (código ${ev.code})` : ""}. Envie outra mensagem para reconectar; a conversa é retomada.${ev.stderr ? `\n${ev.stderr}` : ""}`); r.busy = false; for (const t of s.items) { if (t.k === "text" || t.k === "skill") t.open = false; if (t.k === "tool" && !t.done) { t.done = true; t.isError = true; bump(t); } } break;
   }
   persist();
@@ -451,6 +466,7 @@ function answer(allow, scope) {
 // ---------- ligações ----------
 // ---------- paleta "/" (comandos e skills) e "@" (arquivos) ----------
 const LOCAL_CMDS = [
+  { name: "arvore", description: "árvore de perguntas e respostas sobre os arquivos do projeto", kind: "builtin" },
   { name: "clear", description: "limpa a conversa", kind: "builtin" },
   { name: "fallback", description: "estado do fallback Claude → modelo local", kind: "builtin" },
   { name: "help", description: "lista os comandos", kind: "builtin" },
@@ -518,9 +534,10 @@ $("send").onclick = () => {
   if (t.trim()) { hist.push(t); histPos = -1; }
   if (t.trim() === "/clear") return clearSession();
   if (t.trim() === "/help" && s) {
-    note(s, "info", "/ abre comandos e skills · @ procura arquivos do projeto · arraste ou cole (Ctrl+V) arquivos e imagens no campo · ↑/↓ histórico · Esc interrompe · Ctrl+N nova sessão · /clear limpa · /fallback mostra o motor");
+    note(s, "info", "/ abre comandos e skills · /arvore [--slm|--hibrido|--claude|--demo] [--gens 1-3] pergunta · @ procura arquivos do projeto · arraste ou cole (Ctrl+V) arquivos e imagens no campo · ↑/↓ histórico · Esc interrompe · Ctrl+N nova sessão · /clear limpa · /fallback mostra o motor");
     persist(); return renderAll();
   }
+  if (/^\/arvore(\s|$)/.test(t.trim()) && s) return runTreeCommand(s, t.trim());
   sendMessage(t);
 };
 composerInput.addEventListener("keydown", (e) => {
@@ -593,14 +610,15 @@ $("allow-session").onclick = () => answer(true, "session");
 $("allow-project").onclick = () => answer(true, "project");
 $("deny").onclick = () => answer(false);
 document.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "n") { e.preventDefault(); newSession(); } });
-for (const k of ["mode", "model", "effort", "orch"]) {
+for (const k of ["mode", "model", "effort", "orch", "work"]) {
   $(k).onchange = (e) => {
     const s = active();
     if (!s) return;
     s.settings[k] = e.target.value;
     state.settings = { ...s.settings };
-    if (runtime(s.id).backend === "on") api.write(s.id, { t: "config", [k]: e.target.value });
-    persist();
+    if (k === "work" && e.target.value === "hybrid" && !s.settings.orch) s.settings.orch = "slm"; // o pacote Híbrido escreve no Qwen local
+    if (runtime(s.id).backend === "on") api.write(s.id, { t: "config", ...(k === "work" ? { work: s.settings.work, orch: s.settings.orch } : { [k]: e.target.value }) });
+    persist(); if (k === "work" || k === "orch") renderTop();
   };
 }
 
