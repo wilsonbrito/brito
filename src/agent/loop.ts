@@ -11,6 +11,7 @@ import { fallbackStatus } from "../engine.js";
 import { activateFallback, classifyAnthropicError, fallbackExpired, fallbackUntil, fallbackWarning, returnToPrimary, shortError, triggersFallback, type FallbackState } from "../provider/fallback.js";
 import { fmtBytes, findImages, imageBlock, splitOversize } from "../util/images.js";
 import { orchGuard } from "../orchestrator.js";
+import { recordUsage } from "../usage/ledger.js";
 
 export const MODEL = initialModel();
 
@@ -109,6 +110,7 @@ export class Agent {
       this.usage.output += msg.usage.output;
       this.usage.cacheRead += msg.usage.cacheRead;
       this.usage.steps++;
+      if (!msg.local) recordUsage(resolveModel(this.model).kind === "openai" ? "endpoint" : "claude", msg.usage.input, msg.usage.output);
       if (msg.stopReason === "max_tokens") this.log("⚠ resposta cortada pelo limite de tokens; peça para continuar ou desligue o raciocínio (/reasoning none)");
       // Mensagem vazia não entra no histórico: a API da Anthropic recusaria o próximo turno.
       if (msg.content.length) push({ role: "assistant", content: msg.content });

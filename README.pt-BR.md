@@ -10,6 +10,10 @@ O Brito é um agente para desenvolvimento de software. Use no terminal (`brito-c
 
 *Uma sessão real num pequeno projeto SvelteKit: uma pergunta, duas consultas ao grafo (0,1 s e 0,0 s) e uma resposta que já inclui os componentes `.svelte` que dependem do arquivo. A barra de status mostra o custo real do turno.*
 
+## Novidades da 0.20
+
+- **`/usage` divide os tokens entre o Claude e o Qwen local.** Sessão, hoje, últimos 7 dias e desde o início, com a parcela do volume que ficou no Qwen (estimado em ~4 caracteres/token, sem custo). Fica em `~/.brito/usage.jsonl`; `BRITO_USAGE=off` desliga.
+
 ## Novidades da 0.19
 
 - **Modo Híbrido (desktop): o SLM local e o Claude trabalham juntos.** Um seletor ao lado do modelo alterna entre **Claude** e **Híbrido**. No Híbrido, o decisor de destino passa a agir: pedidos de condensar, extrair, traduzir ou reformatar um texto que veio na mensagem são respondidos pelo Qwen3-4B local (sem tokens do Claude), enquanto raciocínio, código, consultas ao projeto, mensagens com `@arquivo` e qualquer dúvida vão ao Claude. Cada mensagem mostra para onde foi. Precisa de `brito slm pull`; sem o modelo, tudo simplesmente vai ao Claude.

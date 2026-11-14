@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { listAgents, type AgentDef } from "./agents.js";
+import { recordUsage } from "../usage/ledger.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { skillsIndex } from "../skills/store.js";
 import { MCP_NAME, MCP_PREFIX, APPROVE_TOOL } from "../mcp/server.js";
@@ -335,8 +336,10 @@ export class ClaudeSession {
           // próximo turno precisa de --resume — repetir --session-id dá "Session ID … is already in use".
           this.started = true;
           this.pendingHandoff = ""; // o prompt com o contexto já está gravado na sessão do claude
-          this.usage.input += (ev.usage?.input_tokens ?? 0) + (ev.usage?.cache_read_input_tokens ?? 0) + (ev.usage?.cache_creation_input_tokens ?? 0);
+          const inTok = (ev.usage?.input_tokens ?? 0) + (ev.usage?.cache_read_input_tokens ?? 0) + (ev.usage?.cache_creation_input_tokens ?? 0);
+          this.usage.input += inTok;
           this.usage.output += ev.usage?.output_tokens ?? 0;
+          recordUsage("claude", inTok, ev.usage?.output_tokens ?? 0);
           this.usage.cacheRead += ev.usage?.cache_read_input_tokens ?? 0;
           this.costUsd += ev.total_cost_usd ?? 0;
           const win = Object.values<any>(ev.modelUsage ?? {}).map((m) => m?.contextWindow).filter((w) => w > 0);
