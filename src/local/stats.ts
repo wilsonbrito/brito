@@ -1,3 +1,5 @@
+import { recordUsage } from "../usage/ledger.js";
+
 /** Contadores da sessão sobre o trabalho delegado ao SLM local (para o `/context` provar a economia). */
 export const slmStats = {
   /** compactações resumidas pelo SLM */
@@ -24,6 +26,7 @@ const est = (chars: number) => Math.ceil(chars / 4);
 /** Registra uma geração do SLM (chamada por `slmGenerate`/`slmChat`; mesmo se falhar, o custo local existiu). */
 export function recordSlmCall(inChars: number, outChars: number, ms: number) {
   slmStats.calls++; slmStats.tokensIn += est(inChars); slmStats.tokensOut += est(outChars); slmStats.ms += ms;
+  recordUsage("qwen", est(inChars), est(outChars), true);
 }
 
 /** Resumo do gasto local para a barra de status/painel; `null` enquanto o SLM não foi usado. */

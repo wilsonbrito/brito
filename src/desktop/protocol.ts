@@ -32,7 +32,7 @@ export type ServerEvent =
   | { t: "toolEnd"; id: string; isError: boolean; output: string }
   | { t: "info" | "warn" | "error"; msg: string }
   | { t: "approval"; id: string; text: string; force: boolean; kind: string }
-  | { t: "usage"; usage: unknown; contextTokens: number; contextWindow?: number; costUsd: number; slm: { calls: number; tokensIn: number; tokensOut: number; ms: number; tokensSaved: number } | null; hybrid?: Record<string, unknown>; model: string; sessionId: string; fallback: boolean; chip: string }
+  | { t: "usage"; usage: unknown; contextTokens: number; contextWindow?: number; costUsd: number; slm: { calls: number; tokensIn: number; tokensOut: number; ms: number; tokensSaved: number } | null; tokens?: unknown; hybrid?: Record<string, unknown>; model: string; sessionId: string; fallback: boolean; chip: string }
   | { t: "skill"; phase: "reflecting" | "done" | "error"; notes?: string[]; pending?: number }
   | { t: "result"; id: string; data: unknown }
   | { t: "route"; to: "slm" | "claude"; ms: number; text: string }

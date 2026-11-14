@@ -10,6 +10,10 @@ Brito is an agent for software development. Use it in the terminal (`brito-cli` 
 
 *A real session on a small SvelteKit project: one question, two graph calls (0.1 s and 0.0 s), and an answer that already includes the `.svelte` components depending on the file. The status bar shows the real cost of the turn.*
 
+## What's new in 0.20
+
+- **`/usage` splits tokens between Claude and the local Qwen.** Session, today, last 7 days and all time, with the share of the volume the Qwen handled (estimated at ~4 characters/token, no cost). Stored in `~/.brito/usage.jsonl`; `BRITO_USAGE=off` disables it.
+
 ## What's new in 0.19
 
 - **Hybrid mode (desktop): the local SLM and Claude work together.** A selector next to the model switches between **Claude** and **Hybrid**. In Hybrid, the route decider now acts: requests to condense, extract, translate or reformat a text that came in the message are answered by the local Qwen3-4B (no Claude tokens), while reasoning, code, project lookups, `@file` messages and anything uncertain go to Claude. Every message shows where it went. Needs `brito slm pull`; without the model, everything simply goes to Claude.

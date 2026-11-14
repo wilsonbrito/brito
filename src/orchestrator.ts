@@ -6,6 +6,7 @@ import { slmReadySync } from "./local/slm.js";
 import { ENDPOINT_KEY_ENV } from "./endpoint.js";
 import type { AgentDef } from "./agent/agents.js";
 import { PROFILE_ENV, profileState, type Profile } from "./profile.js";
+import { SID_ENV, usageSid } from "./usage/ledger.js";
 
 // Modo orquestrador: o modelo principal (Claude) planeja e revisa; um perfil de endpoint (o qwen) implementa cada task
 // pela tool `implement`. Estado global da sessão, como o `perms`.
@@ -82,10 +83,12 @@ export const ORCH_ENV = "BRITO_ORCH";
 
 /** Env do servidor MCP: liga a tool `implement` lá e diz qual perfil implementa. */
 export const orchEnv = (): Record<string, string> => {
-  if (!orch.on) return {};
+  // o gasto do Qwen no servidor MCP (implementador, digest…) entra na MESMA sessão do livro-caixa de tokens
+  const sid = { [SID_ENV]: usageSid };
+  if (!orch.on) return sid;
   // a chave do endpoint vai só ao servidor MCP (que roda o implementador), não ao ambiente do claude e dos comandos dele
   const key = process.env[ENDPOINT_KEY_ENV];
-  return { [ORCH_ENV]: "1", BRITO_IMPL_MODEL: orch.model, ...(profileState.setting !== "auto" ? { [PROFILE_ENV]: profileState.setting } : {}), ...(key ? { [ENDPOINT_KEY_ENV]: key } : {}) };
+  return { ...sid, [ORCH_ENV]: "1", BRITO_IMPL_MODEL: orch.model, ...(profileState.setting !== "auto" ? { [PROFILE_ENV]: profileState.setting } : {}), ...(key ? { [ENDPOINT_KEY_ENV]: key } : {}) };
 };
 
 /** Uma task do implementador leva minutos: o timeout padrão do claude CLI para tools MCP cortaria no meio (30 min). */

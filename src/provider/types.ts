@@ -28,6 +28,8 @@ export interface ModelMessage {
   stopReason: "end_turn" | "tool_use" | "max_tokens" | "other";
   /** `input` = tamanho do prompt inteiro (inclui o que veio do cache) */
   usage: { input: number; output: number; cacheRead: number };
+  /** veio do Qwen embutido: já contado no livro-caixa por `recordSlmCall`, o loop não conta de novo */
+  local?: boolean;
 }
 
 export interface SendHooks {

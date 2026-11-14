@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.20.0 — 2026-11-14
+
+### Added
+- **`/usage` mostra os tokens do Claude × Qwen.** Um livro-caixa (`~/.brito/usage.jsonl`, só de acréscimo) registra cada chamada com quem gastou (Claude, Qwen local ou endpoint) e o `/usage` divide o consumo em Sessão, Hoje, Últimos 7 dias e Desde o início, com a parcela do volume que ficou no Qwen. O Qwen é estimado (~4 caracteres por token) e não tem custo. O gasto do Qwen no servidor MCP (implementador do Híbrido, `digest`) entra na mesma sessão via `BRITO_USAGE_SID`. No desktop, o evento `usage` ganha o campo `tokens` com os mesmos números. `BRITO_USAGE=off` desliga a gravação.
+
+### Changed
+- `orchEnv()` passa a devolver sempre o id de sessão de tokens (antes, `{}` com o modo orquestrador desligado).
+- O loop não conta de novo no livro-caixa as respostas do Qwen embutido (`ModelMessage.local`): elas já são registradas por `recordSlmCall`.
+
 ## 0.19.1 — 2026-11-14
 
 ### Fixed

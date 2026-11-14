@@ -78,6 +78,7 @@ export class LocalSlmProvider implements ModelProvider {
     r.calls.forEach((c, i) => content.push({ type: "tool_use", id: `slm_${Date.now().toString(36)}_${i}`, name: c.name, input: c.input }));
     const input = approxTokens(JSON.stringify(history));
     return {
+      local: true,
       content,
       stopReason: r.calls.length ? "tool_use" : r.truncated ? "max_tokens" : "end_turn",
       usage: { input, output: approxTokens(r.text + JSON.stringify(r.calls)), cacheRead: 0 },

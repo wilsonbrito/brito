@@ -183,11 +183,12 @@ test("fallback para o qwen no meio do turno desliga o modo", async () => {
   sb.cleanup();
 });
 
-test("env do servidor MCP: só com o modo ligado", () => {
-  assert.deepEqual(orchEnv(), {});
+test("env do servidor MCP: o modo só com ele ligado; o id de sessão de tokens sempre", () => {
+  const base = orchEnv();
+  assert.deepEqual(Object.keys(base), ["BRITO_USAGE_SID"]);
   orch.on = true;
   orch.model = "outro";
-  assert.deepEqual(orchEnv(), { [ORCH_ENV]: "1", BRITO_IMPL_MODEL: "outro" });
+  assert.deepEqual(orchEnv(), { ...base, [ORCH_ENV]: "1", BRITO_IMPL_MODEL: "outro" });
 });
 
 test("servidor MCP expõe implement só com o modo ligado", () => {
