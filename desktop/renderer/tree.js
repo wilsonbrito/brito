@@ -85,7 +85,7 @@ function renderTreeOut() {
 function onTreeEvent(sessionId, ev) {
   runtime(sessionId).tree = ev.snapshot;
   const s = active();
-  if (panelId === "tree" && s && s.id === sessionId) renderTreeOut();
+  if (s && s.id === sessionId) { if (panelId === "tree") renderTreeOut(); else if (panelId === "treeviz") renderTreeViz(); }
 }
 
 async function treeView(s) {
