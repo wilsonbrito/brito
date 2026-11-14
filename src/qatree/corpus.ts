@@ -35,12 +35,13 @@ export function buildCorpus(root: string, files: string[]): Corpus {
   for (const rel of files) {
     if (used >= MAX_FILES) break;
     if (!TEXT_EXT.has(path.extname(rel).toLowerCase()) || rel.startsWith(".brito/") || /(^|\/)(node_modules|dist|package-lock\.json)/.test(rel)) continue;
-    let text: string;
+    let text: string | null = null;
     try {
-      const abs = path.join(root, rel);
-      if (fs.statSync(abs).size > MAX_FILE) continue;
-      text = fs.readFileSync(abs, "utf8");
+      // um único descritor: tamanho e conteúdo vêm do mesmo arquivo (sem corrida entre checar e ler)
+      const fd = fs.openSync(path.join(root, rel), "r");
+      try { if (fs.fstatSync(fd).size <= MAX_FILE) text = fs.readFileSync(fd, "utf8"); } finally { fs.closeSync(fd); }
     } catch { continue; }
+    if (text === null) continue;
     used++;
     chunkText(text).forEach((c, i) => {
       const tf = new Map<string, number>();
