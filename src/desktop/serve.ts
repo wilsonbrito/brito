@@ -43,6 +43,10 @@ import { autoConsolidate } from "../skills/consolidate.js";
 import { expireTrials, skillsMode } from "../skills/trial.js";
 import { withSlm } from "../local/slm.js";
 import { shadowRoute } from "../route/log.js";
+import { buildCorpus } from "../qatree/corpus.js";
+import { evolve } from "../qatree/engine.js";
+import { demoOracle, llmOracle } from "../qatree/oracle.js";
+import { apiComplete, cliComplete } from "../qatree/complete.js";
 import type { ToolContext } from "../tools/registry.js";
 
 /**
@@ -371,6 +375,7 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
   const ready =() => emit({ t: "ready", engine: engine.kind, sessionId: engine.sessionId, model: engine.model, effort: engine.effort, mode: perms.mode, orch: orch.on, orchMode: orchMode(), endpointReady: implStatus(engine.model, endpointName(), process.env).ready, endpoint: endpointInfo(), symbols: syms, notes, root, fallback: engine.fallback.active, chip: chipOf(engine.model, engine.fallback) });
   ready();
 
+  let treeRun: AbortController | null = null;
   const rl = readline.createInterface({ input: process.stdin });
   const quit = async () => { closeApproval(); try { await panels.close(); await engine.close(); } catch { /* saindo */ } process.exit(0); };
   rl.on("close", quit);
@@ -405,6 +410,31 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
         }
         break;
       }
+      case "tree": {
+        // PoC da árvore de perguntas e respostas: roda à parte do turno do chat e emite um snapshot a cada etapa
+        if (treeRun) return emit({ t: "warn", msg: "já existe uma árvore em andamento" });
+        const ac = new AbortController();
+        treeRun = ac;
+        const id = String(m.id);
+        void (async () => {
+          const question = String(m.question ?? "").trim();
+          const mode: "demo" | "llm" = m.mode === "llm" ? "llm" : "demo";
+          const clamp = (v: unknown, lo: number, hi: number, d: number) => Math.min(hi, Math.max(lo, Number.isFinite(Number(v)) ? Math.floor(Number(v)) : d));
+          try {
+            if (!question) throw new Error("escreva uma pergunta");
+            const corpus = buildCorpus(root, projectFiles(root));
+            if (!corpus.chunks.length) throw new Error("não há arquivos de texto neste projeto para servir de fonte");
+            const complete = engine.kind === "api" ? apiComplete(engine.model, ac.signal) : cliComplete(process.env.BRITO_LEARN_MODEL ?? "", ac.signal);
+            const oracle = mode === "llm" ? llmOracle(complete) : demoOracle();
+            await evolve(question, corpus, oracle, { gens: clamp(m.gens, 1, 3, 2), breadth: clamp(m.breadth, 2, 4, 3), maxCalls: clamp(m.maxCalls, 5, 120, mode === "llm" ? 40 : 80) },
+              (snapshot) => emit({ t: "tree", id, snapshot }), ac.signal, mode);
+          } catch (e: any) {
+            emit({ t: "tree", id, snapshot: { question, phase: "erro", gen: 0, gens: 0, calls: 0, maxCalls: 0, done: true, error: e?.message ?? String(e), nodes: [], ranking: [], corpus: { files: 0, chunks: 0 }, mode } });
+          } finally { treeRun = null; }
+        })();
+        break;
+      }
+      case "treeStop": treeRun?.abort(); break;
       case "abort": engine.abort(); break;
       case "query": {
         let data: unknown = [];

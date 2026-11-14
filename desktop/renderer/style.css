@@ -291,3 +291,51 @@ code.fileref:hover { background: var(--line); }
 #expand { width: 28px; height: 28px; border-radius: 6px; color: var(--mute); font-size: 15px; }
 #expand:hover, #expand.on { background: var(--bg); color: var(--fg); }
 #expand.on { color: var(--accent2); }
+
+/* Aba Árvore (PoC de perguntas e respostas evolutivas) */
+.qt-form { display: flex; flex-direction: column; gap: 8px; }
+.qt-input { width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; outline: none; resize: vertical; }
+.qt-input:focus { border-color: var(--accent); }
+.qt-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.qt-row select { background: var(--bg); border: 1px solid var(--line); }
+.qt-run { margin-left: auto !important; background: var(--accent); color: #fff; padding: 6px 14px; border-radius: 8px; }
+.qt-run.stop { background: var(--err); }
+.qt-status { margin: 10px 0 2px; font-size: 12.5px; color: var(--mute); } .qt-status b { color: var(--fg); } .qt-status.err b { color: var(--err); }
+.qt-note { font-size: 11.5px; color: var(--mute); margin: 0 0 8px; }
+.qt-ans { margin-bottom: 8px; } .qt-ans.best { border-color: var(--ok); } .qt-ans.pruned { opacity: .55; }
+.qt-h { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+.qt-rank { color: var(--accent2); } .qt-conf { font-weight: 700; margin-right: auto; }
+.qt-bar { height: 5px; background: var(--bg); border-radius: 3px; overflow: hidden; margin-bottom: 6px; } .qt-bar i { display: block; height: 100%; background: var(--accent2); }
+.qt-text { font-size: 13px; margin: 4px 0 6px; }
+.qt-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+.qt-chip { font-size: 10.5px; padding: 1px 7px; border-radius: 10px; background: var(--bg); color: var(--mute); border: 1px solid var(--line); white-space: nowrap; }
+.qt-chip.ok { color: var(--ok); border-color: var(--ok); } .qt-chip.bad { color: var(--err); border-color: var(--err); }
+.qt-det summary { cursor: pointer; font-size: 11.5px; color: var(--mute); }
+.qt-quotes { margin: 4px 0 4px 4px; } .qt-q { font-size: 11.5px; color: var(--mute); margin: 2px 0; } .qt-q.ok b { color: var(--ok); } .qt-q.bad b { color: var(--err); } .qt-q em { font-style: normal; opacity: .7; }
+.qt-node { margin-left: 14px; border-left: 1px solid var(--line); padding-left: 8px; }
+.qt-node > summary { cursor: pointer; display: flex; gap: 6px; align-items: baseline; padding: 3px 0; font-size: 12.5px; list-style: none; }
+.qt-node > summary::-webkit-details-marker { display: none; }
+.qt-node.pruned > summary { opacity: .5; text-decoration: line-through; text-decoration-color: #ffffff30; }
+.qt-lbl { flex: 1; } .qt-node.q > summary .qt-lbl { font-weight: 600; }
+.qt-out > .qt-node { margin-left: 0; }
+
+/* Árvore visual (beta) */
+#panel-btns .beta { font-size: 9px; text-transform: uppercase; letter-spacing: .06em; padding: 1px 5px; border-radius: 8px; background: var(--accent); color: #fff; margin-left: 4px; vertical-align: 1px; }
+.tv-wrap { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.tv-bar { display: flex; gap: 10px; align-items: center; padding: 8px 18px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--mute); }
+.tv-bar .tv-status { margin-right: auto; }
+.tv-body { flex: 1; display: flex; min-height: 0; }
+.tv-stage { flex: 1; min-width: 0; position: relative; background: radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 0) 0 0 / 22px 22px; }
+.tv-svg { width: 100%; height: 100%; cursor: grab; touch-action: none; display: block; } .tv-svg:active { cursor: grabbing; }
+.tv-detail { width: 320px; flex: none; border-left: 1px solid var(--line); padding: 12px 16px; overflow: auto; background: var(--side); }
+.tv-legend { padding: 6px 18px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--mute); }
+.tv-edge { fill: none; stroke: var(--line); stroke-width: 1.6; } .tv-edge.pruned { stroke-dasharray: 4 4; opacity: .6; }
+.tv-node { cursor: pointer; }
+.tv-node rect { fill: var(--panel); stroke: var(--line); stroke-width: 1.6; }
+.tv-node.q rect { stroke: var(--accent2); }
+.tv-node.pruned rect { stroke-dasharray: 5 4; stroke: var(--mute); }
+.tv-node.pruned { opacity: .5; }
+.tv-node.sel rect { stroke-width: 3; filter: drop-shadow(0 0 6px #8119bd88); }
+.tv-node text { fill: var(--fg); font-size: 11px; pointer-events: none; }
+.tv-node .tv-score { fill: var(--mute); font-size: 10px; font-weight: 700; }
+.tv-node:hover rect { fill: var(--bg); }
