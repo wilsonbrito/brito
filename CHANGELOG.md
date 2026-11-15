@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.20.1 — 2026-11-15
+
+### Fixed
+- **O app desktop agora leva o SLM local, então o modo Híbrido funciona nele.** O `node-llama-cpp` (dependência opcional) não era empacotado: o app respondia "SLM local indisponível" mesmo com o modelo baixado e o CLI global funcionando. O empacotamento (`desktop/package.mjs`) instala a biblioteca na versão da raiz, com o binário nativo do SO, e a copia para o `node_modules` do app. As variantes CUDA ficam de fora (centenas de MB; o llama.cpp usa Vulkan ou CPU). Se a instalação falhar, o build avisa e segue sem o SLM. Quem já tem o app precisa instalar a nova versão.
+
 ## 0.20.0 — 2026-11-14
 
 ### Added

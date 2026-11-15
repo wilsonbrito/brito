@@ -62,6 +62,32 @@ function copyApp(appDir) {
     if (fs.existsSync(src) && fs.statSync(src).size !== fs.statSync(f).size) { bad++; console.error("tamanho divergente:", path.relative(appDir, f)); }
   }
   if (bad) throw new Error(`${bad} arquivo(s) copiados incompletos (iCloud?). Rode de novo ou tire o projeto de ~/Documents.`);
+  bundleLlama(appDir); // depois da conferência: as dependências dele podem ter versões diferentes das da raiz
+}
+
+/**
+ * SLM local (modo Híbrido) no app: o node-llama-cpp é dependência opcional e tem muitas dependências próprias + um pacote
+ * nativo por plataforma. Instala num diretório temporário (o npm escolhe só os binários deste SO/arquitetura) e mescla no
+ * node_modules do app. Variantes CUDA ficam de fora (centenas de MB; o llama.cpp cai para Vulkan/CPU sem elas).
+ * Falha aqui não derruba o build: o app só perde o SLM (o brito já avisa "SLM indisponível").
+ */
+function bundleLlama(appDir) {
+  try {
+    const ver = JSON.parse(fs.readFileSync(path.join(root, "node_modules", "node-llama-cpp", "package.json"), "utf8")).version;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brito-llama-"));
+    fs.writeFileSync(path.join(tmp, "package.json"), JSON.stringify({ name: "llama-tmp", private: true }));
+    sh("npm", ["install", `node-llama-cpp@${ver}`, "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: tmp, shell: plat === "win32" });
+    const nm = path.join(tmp, "node_modules");
+    for (const d of fs.readdirSync(path.join(nm, "@node-llama-cpp"), { withFileTypes: true })) {
+      if (/cuda/.test(d.name)) fs.rmSync(path.join(nm, "@node-llama-cpp", d.name), { recursive: true, force: true });
+    }
+    fs.cpSync(nm, path.join(appDir, "node_modules"), { recursive: true, force: false, errorOnExist: false });
+    fs.rmSync(tmp, { recursive: true, force: true });
+    if (!fs.existsSync(path.join(appDir, "node_modules", "node-llama-cpp"))) throw new Error("node-llama-cpp não foi copiado");
+    console.log(`node-llama-cpp ${ver} → app`);
+  } catch (e) {
+    console.warn(`AVISO: sem node-llama-cpp no app (modo Híbrido indisponível): ${e.message}`);
+  }
 }
 
 /** Pasta com libssl.3/libcrypto.3 do OpenSSL 3 na arquitetura deste build (Homebrew, ou OPENSSL_LIB_DIR). */
