@@ -81,7 +81,8 @@ function bundleLlama(appDir) {
     for (const d of fs.readdirSync(path.join(nm, "@node-llama-cpp"), { withFileTypes: true })) {
       if (/cuda/.test(d.name)) fs.rmSync(path.join(nm, "@node-llama-cpp", d.name), { recursive: true, force: true });
     }
-    fs.cpSync(nm, path.join(appDir, "node_modules"), { recursive: true, force: false, errorOnExist: false });
+    // symlinks (node_modules/.bin) ficam de fora: soltos, derrubam o `xattr -cr` do macOS e não servem em runtime
+    fs.cpSync(nm, path.join(appDir, "node_modules"), { recursive: true, force: false, errorOnExist: false, filter: (src) => !fs.lstatSync(src).isSymbolicLink() });
     fs.rmSync(tmp, { recursive: true, force: true });
     if (!fs.existsSync(path.join(appDir, "node_modules", "node-llama-cpp"))) throw new Error("node-llama-cpp não foi copiado");
     console.log(`node-llama-cpp ${ver} → app`);
