@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.20.3 — 2026-11-16
+
+### Fixed
+- **Painel Árvore do desktop voltou a abrir.** O painel mostrava "Erro: treeView is not defined". `tree.js` e `panels.js` declaravam o mesmo `const fmtTok`, e como os scripts do renderer dividem o escopo global, o `tree.js` falhava ao carregar ("Identifier 'fmtTok' has already been declared") e nenhuma função dele existia. O formatador do `tree.js` virou `treeFmtTok`. Quem já tem o app precisa instalar a nova versão.
+
 ## 0.20.2 — 2026-11-15
 
 ### Fixed
