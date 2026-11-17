@@ -1,7 +1,9 @@
 // Confere o app empacotado (desktop/dist-app) antes de publicar: arquivos essenciais presentes e sem symlinks soltos.
 // Uso: node desktop/verify-package.mjs   (depois de `node desktop/package.mjs`)
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const out = path.join(path.dirname(fileURLToPath(import.meta.url)), "dist-app");
@@ -15,6 +17,12 @@ const walk = (d, depth = 0) => {
 };
 if (!fs.existsSync(out)) { console.error("dist-app não existe: rode node desktop/package.mjs"); process.exit(1); }
 walk(out);
+// Linux só gera .tar.gz: extrai para uma pasta temporária e confere o conteúdo.
+for (const f of fs.readdirSync(out).filter((n) => n.endsWith(".tar.gz"))) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brito-verify-"));
+  execFileSync("tar", ["-xzf", path.join(out, f), "-C", tmp]);
+  walk(tmp);
+}
 const errs = [];
 if (!roots.length) errs.push("pasta app/ (com main.mjs) não encontrada no pacote");
 for (const app of roots) {
