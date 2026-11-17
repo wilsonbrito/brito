@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.20.3 — 2026-11-17
+
+### Fixed
+- **A Árvore visual do app desktop volta a abrir ("chip is not defined").** `tree.js` e `panels.js` declaravam `const fmtTok` no mesmo escopo global; o `tree.js` falhava ao carregar e levava junto `chip`, `pct` e `quotesView`. O helper do `tree.js` virou `fmtTokTree`, e um teste novo barra declarações de topo duplicadas entre os scripts do renderer (#47).
+
 ## 0.20.2 — 2026-11-15
 
 ### Fixed
