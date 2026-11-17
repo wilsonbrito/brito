@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Desktop: mensagem enviada logo depois de um turno longo não é mais descartada.** A reflexão pós-turno (skills) rodava dentro do turno ocupado; um pedido enviado nesse intervalo recebia "já existe um turno em andamento" e sumia, deixando o app girando. Agora a reflexão roda em segundo plano e pedidos que chegam com o backend ocupado entram numa fila.
+- **Desktop: Enter com o agente ocupado põe a mensagem na fila** (como no terminal) em vez de interromper o turno. Esc ou o botão ■ com o campo vazio interrompem.
+
+### Added
+- **Desktop: `/diagnostico` mostra onde o tempo dos últimos turnos foi** (roteamento local do Híbrido, espera do modelo, tools, reflexão, abertura do backend). Cada turno é gravado em `~/.brito/desktop-timing.jsonl` (últimas 500 linhas).
+- **Desktop: o indicador de trabalho mostra a fase** ("consultando o modelo local", "aguardando o modelo", "Executando <tool>") em vez de só "Trabalhando".
+
 ## 0.20.3 — 2026-11-17
 
 ### Fixed

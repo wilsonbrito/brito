@@ -7,6 +7,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { execFileSync } from "node:child_process";
 import { PROTOCOL, type CommandInfo } from "./protocol.js";
+import { TurnTimer, readTimings, recordTiming, summarizeTimings } from "./timing.js";
 import { Panels, graphRootFor } from "./panels.js";
 import { randomUUID } from "node:crypto";
 import "../tools/fs.js";
@@ -99,14 +100,18 @@ function saveAllow(root: string, kinds: string[]) {
   fs.writeFileSync(allowFile(), JSON.stringify(all, null, 1));
 }
 
+/** Medição do turno em andamento (ver timing.ts); `null` fora de um turno. */
+let timer: TurnTimer | null = null;
+const phase = (label: string) => emit({ t: "phase", label });
+
 const sink: TurnSink = {
   turnStart: () => emit({ t: "turnStart" }),
   turnEnd: (ok = true) => emit({ t: "turnEnd", ok }),
-  text: (text) => emit({ t: "text", text }),
+  text: (text) => { timer?.firstToken(); emit({ t: "text", text }); },
   textEnd: () => emit({ t: "textEnd" }),
-  thinking: (text) => emit({ t: "thinking", text }),
-  toolStart: (id, name, input) => emit({ t: "toolStart", id, name, input }),
-  toolEnd: (id, isError, output) => emit({ t: "toolEnd", id, isError, output: (output ?? "").slice(0, 20000) }),
+  thinking: (text) => { timer?.firstToken(); emit({ t: "thinking", text }); },
+  toolStart: (id, name, input) => { timer?.toolStart(id); emit({ t: "toolStart", id, name, input }); },
+  toolEnd: (id, isError, output) => { timer?.toolEnd(id); emit({ t: "toolEnd", id, isError, output: (output ?? "").slice(0, 20000) }); },
   info: (msg) => emit({ t: "info", msg }),
   warn: (msg) => emit({ t: "warn", msg }),
   error: (msg) => emit({ t: "error", msg }),
@@ -181,6 +186,8 @@ interface ApiEngineOpts {
 }
 
 export async function serveDesktop(root: string, resumeId?: string): Promise<void> {
+  const boot0 = Date.now();
+  let bootMs: number | undefined; // abertura do backend, anexada ao primeiro turno medido
   const pending = new Map<string, { resolve: (ok: boolean) => void; kind: string }>();
   /** Tipos de pedido liberados com "permitir nesta sessão" (nunca vale para pedidos `force`, como aprovar plano ou skill). */
   const projectAllow = new Set<string>(loadAllow(root));
@@ -368,6 +375,7 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
   const endpointName = () => { const m = initialImplModel(); return m === SLM_MODEL ? "qwen" : m; };
   const orchMode = () => writerChoice();
   const ready =() => emit({ t: "ready", engine: engine.kind, sessionId: engine.sessionId, model: engine.model, effort: engine.effort, mode: perms.mode, orch: orch.on, orchMode: orchMode(), work: workOf(), custom: isCustom(), endpointReady: implStatus(engine.model, endpointName(), process.env).ready, endpoint: endpointInfo(), symbols: syms, notes, root, fallback: engine.fallback.active, chip: chipOf(engine.model, engine.fallback) });
+  bootMs = Date.now() - boot0;
   ready();
 
   let treeRun: AbortController | null = null;
@@ -375,6 +383,87 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
   /** medição do Híbrido para o painel: contadores da sessão + configuração em vigor */
   const hybridInfo = () => ({ on: hybrid.on, ...routeStats, judge: hybrid.judge, profile: profileState.setting, profileNow: profileFor(root), writer: hybrid.writer });
   const localLog: LocalExchange[] = []; // trocas respondidas pelo SLM que o Claude ainda não viu
+  /** Pedidos que chegaram com o backend ocupado: seguem em ordem em vez de serem descartados. */
+  const queued: string[] = [];
+  /** Reflexão pós-turno em segundo plano: não segura o próximo pedido (só uma por vez). */
+  let learning: Promise<void> | null = null;
+  const learnInBackground = (t: TurnTimer) => {
+    if (learning) return;
+    const t0 = Date.now();
+    learning = engine.learn().catch(() => {}).finally(() => { learning = null; t.learnMs = Date.now() - t0; });
+  };
+
+  async function handleSend(raw: string): Promise<void> {
+    if (busy) { queued.push(raw); emit({ t: "info", msg: `↳ na fila: ${raw.split("\n")[0].slice(0, 60)}` }); return; }
+    if (raw.trim() === "/fallback") {
+      const fb = engine.fallback;
+      const primary = fb.active ? fb.primary : engine.model;
+      const lines = renderFallback(fb, engine.model, engine.engineLabel(primary), fallbackStatus(primary, process.env));
+      sink.turnStart(); sink.text("```\n" + lines.join("\n") + "\n```"); sink.textEnd(); sink.turnEnd(true);
+      return;
+    }
+    if (raw.trim() === "/diagnostico") {
+      sink.turnStart(); sink.text("```\n" + summarizeTimings(readTimings(30)) + "\n```"); sink.textEnd(); sink.turnEnd(true);
+      return;
+    }
+    // /nome de uma skill: mesma invocação do REPL (skill_load + contexto).
+    let text = raw;
+    const [cmd, ...args] = text.trim().split(/\s+/);
+    const sk = cmd.startsWith("/") && !cmd.slice(1).includes("/") ? getSkill(root, cmd.slice(1).toLowerCase()) : null;
+    if (sk) {
+      const ctxText = args.join(" ");
+      text = `Invoquei a skill ${sk.name}. Chame skill_load("${sk.name}") agora e siga-a.${ctxText ? `\n\nContexto: ${ctxText}` : "\n\n(Sem contexto extra: comece perguntando sobre o que quero trabalhar.)"}`;
+    }
+    busy = true;
+    const tm = (timer = new TurnTimer());
+    let ok = true, who: string = engine.kind;
+    try {
+      if (cmd === "/learn") await engine.learn(true);
+      else {
+        // Híbrido: o decisor de destino pode mandar o pedido ao SLM local (sem tokens do Claude); na dúvida vai ao Claude
+        let routed: Outcome | null = null;
+        if (hybrid.on && !sk) {
+          phase("consultando o modelo local");
+          const tr = Date.now();
+          localRun = new AbortController();
+          const j = hybrid.judge;
+          const judge = j.on ? (engine.kind === "api" ? apiComplete(MODEL_ALIASES[j.model] ?? j.model, localRun.signal) : cliComplete(j.model, localRun.signal)) : null;
+          routed = await tryLocal(raw, { on: true, signal: localRun.signal, judge, threshold: j.threshold, rounds: j.rounds });
+          localRun = null;
+          tm.routeMs = Date.now() - tr;
+        }
+        if (routed?.handled) {
+          who = "slm";
+          const rv = routed.rounds ? ` em ${routed.rounds} rodada${routed.rounds === 1 ? "" : "s"}` : "";
+          emit({ t: "route", to: "slm", ms: routed.ms, text: `↳ respondido pelo modelo local (Qwen3-4B, ${(routed.ms / 1000).toFixed(1)} s) · revisado pelo juiz: nota ${routed.score}/10${rv}` });
+          sink.turnStart(); sink.text(routed.answer); sink.textEnd(); sink.turnEnd(true);
+          localLog.push({ question: raw, answer: routed.answer });
+        } else {
+          if (routed?.decision) { if (routed.route !== "slm") routeStats.claudeRouted++; emit({ t: "route", to: "claude", ms: routed.decision.ms, text: `↳ roteado para o Claude (${routed.why})` }); }
+          const out = withLocalContext(text, localLog, routed && !routed.handled ? routed.draft : null);
+          localLog.length = 0;
+          const tc = Date.now();
+          phase("aguardando o modelo");
+          await engine.send(out);
+          if (hybrid.on) { routeStats.claudeTurns++; routeStats.claudeMs += Date.now() - tc; }
+        }
+      }
+    } catch (e: any) { ok = false; sink.error(e?.message ?? String(e)); }
+    finally {
+      timer = null;
+      busy = false;
+      emit({ t: "usage", ...engine.stats(), slm: slmUsage(), tokens: periods(readLedger()), hybrid: hybridInfo(), model: engine.model, sessionId: engine.sessionId, fallback: engine.fallback.active, chip: chipOf(engine.model, engine.fallback) });
+    }
+    // A reflexão roda depois de liberar o backend: o próximo pedido não espera por ela (antes era descartado nesse intervalo).
+    if (cmd !== "/learn" && who !== "slm") learnInBackground(tm);
+    const boot = bootMs;
+    bootMs = undefined;
+    // a linha de medição só é gravada quando a reflexão termina (ou já, se não houve)
+    void (learning ?? Promise.resolve()).then(() => recordTiming(tm.finish(who, engine.model, ok, boot)));
+    const next = queued.shift();
+    if (next !== undefined) void handleSend(next);
+  }
+
   const rl = readline.createInterface({ input: process.stdin });
   const quit = async () => { closeApproval(); try { await panels.close(); await engine.close(); } catch { /* saindo */ } process.exit(0); };
   rl.on("close", quit);
@@ -382,57 +471,7 @@ export async function serveDesktop(root: string, resumeId?: string): Promise<voi
     let m: any;
     try { m = JSON.parse(line); } catch { return; }
     switch (m.t) {
-      case "send": {
-        if (busy) return emit({ t: "warn", msg: "já existe um turno em andamento" });
-        if (String(m.text ?? "").trim() === "/fallback") {
-          const fb = engine.fallback;
-          const primary = fb.active ? fb.primary : engine.model;
-          const lines = renderFallback(fb, engine.model, engine.engineLabel(primary), fallbackStatus(primary, process.env));
-          sink.turnStart(); sink.text("```\n" + lines.join("\n") + "\n```"); sink.textEnd(); sink.turnEnd(true);
-          return;
-        }
-        // /nome de uma skill: mesma invocação do REPL (skill_load + contexto).
-        let text = String(m.text ?? "");
-        const [cmd, ...args] = text.trim().split(/\s+/);
-        const sk = cmd.startsWith("/") && !cmd.slice(1).includes("/") ? getSkill(root, cmd.slice(1).toLowerCase()) : null;
-        if (sk) {
-          const ctxText = args.join(" ");
-          text = `Invoquei a skill ${sk.name}. Chame skill_load("${sk.name}") agora e siga-a.${ctxText ? `\n\nContexto: ${ctxText}` : "\n\n(Sem contexto extra: comece perguntando sobre o que quero trabalhar.)"}`;
-        }
-        busy = true;
-        try {
-          if (cmd === "/learn") await engine.learn(true);
-          else {
-            // Híbrido: o decisor de destino pode mandar o pedido ao SLM local (sem tokens do Claude); na dúvida vai ao Claude
-            let routed: Outcome | null = null;
-            if (hybrid.on && !sk) {
-              localRun = new AbortController();
-              const j = hybrid.judge;
-              const judge = j.on ? (engine.kind === "api" ? apiComplete(MODEL_ALIASES[j.model] ?? j.model, localRun.signal) : cliComplete(j.model, localRun.signal)) : null;
-              routed = await tryLocal(String(m.text ?? ""), { on: true, signal: localRun.signal, judge, threshold: j.threshold, rounds: j.rounds });
-              localRun = null;
-            }
-            if (routed?.handled) {
-              const rv = routed.rounds ? ` em ${routed.rounds} rodada${routed.rounds === 1 ? "" : "s"}` : "";
-              emit({ t: "route", to: "slm", ms: routed.ms, text: `↳ respondido pelo modelo local (Qwen3-4B, ${(routed.ms / 1000).toFixed(1)} s) · revisado pelo juiz: nota ${routed.score}/10${rv}` });
-              sink.turnStart(); sink.text(routed.answer); sink.textEnd(); sink.turnEnd(true);
-              localLog.push({ question: String(m.text ?? ""), answer: routed.answer });
-            } else {
-              if (routed?.decision) { if (routed.route !== "slm") routeStats.claudeRouted++; emit({ t: "route", to: "claude", ms: routed.decision.ms, text: `↳ roteado para o Claude (${routed.why})` }); }
-              const out = withLocalContext(text, localLog, routed && !routed.handled ? routed.draft : null);
-              localLog.length = 0;
-              const tc = Date.now();
-              await engine.send(out);
-              if (hybrid.on) { routeStats.claudeTurns++; routeStats.claudeMs += Date.now() - tc; }
-              await engine.learn();
-            }
-          }
-        } finally {
-          busy = false;
-          emit({ t: "usage", ...engine.stats(), slm: slmUsage(), tokens: periods(readLedger()), hybrid: hybridInfo(), model: engine.model, sessionId: engine.sessionId, fallback: engine.fallback.active, chip: chipOf(engine.model, engine.fallback) });
-        }
-        break;
-      }
+      case "send": void handleSend(String(m.text ?? "")); break;
       case "tree": {
         // PoC da árvore de perguntas e respostas: roda à parte do turno do chat e emite um snapshot a cada etapa
         if (treeRun) return emit({ t: "warn", msg: "já existe uma árvore em andamento" });

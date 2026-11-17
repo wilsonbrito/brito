@@ -24,6 +24,8 @@ export type ServerEvent =
   | { t: "hello"; protocol: number }
   | { t: "ready"; engine: "api" | "claude"; sessionId: string; model: string; effort: string; mode: string; symbols: number; notes: number; root: string; fallback: boolean; chip: string }
   | { t: "turnStart" }
+  /** o que o backend está esperando agora (o spinner mostra no lugar de "Trabalhando") */
+  | { t: "phase"; label: string }
   | { t: "turnEnd"; ok: boolean }
   | { t: "text"; text: string }
   | { t: "textEnd" }
