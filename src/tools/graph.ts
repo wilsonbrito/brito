@@ -2,6 +2,7 @@ import { z } from "zod";
 import crypto from "node:crypto";
 import { defineTool } from "./registry.js";
 import { indexProject } from "../graph/indexer.js";
+import type { GraphStore } from "../graph/store.js";
 import { listSkills } from "../skills/store.js";
 import "./graph-notes.js";
 import "./graph-notes-path.js";
@@ -33,18 +34,71 @@ defineTool({
   },
 });
 
+interface Def { id: string; name: string; kind: string; file: string; line: number; endLine: number }
+
+/** Acima disto o nome é tão repetido que despejar os resultados de todas as definições só faz ruído: lista as definições e pede `file`. */
+const MAX_GROUPS = 8;
+const MAX_ROWS = 60;
+const FILE_HINT = "Passe `file` (caminho ou sufixo, ex.: \"graph/indexer.ts\") para escolher a definição.";
+
+/**
+ * Definições de `symbol` (nome exato ou `Classe.nome`), opcionalmente só no arquivo `file`: caminho exato ou sufixo por
+ * segmento ("a.ts" casa com "src/a.ts", não com "src/data.ts"). Várias definições com o mesmo nome são comuns (`run`, `add`).
+ */
+async function findDefs(graph: GraphStore, symbol: string, file?: string): Promise<Def[]> {
+  const f = file?.replace(/\\/g, "/").replace(/^\.\//, "");
+  const rows = await graph.run(
+    `MATCH (s:Symbol) WHERE (s.name = $n OR s.name ENDS WITH $dn) ${f ? "AND (s.file = $f OR s.file ENDS WITH $sf)" : ""} ` +
+      `RETURN s.id AS id, s.name AS name, s.kind AS kind, s.file AS file, s.startLine AS line, s.endLine AS endLine ORDER BY s.file, s.startLine LIMIT 200`,
+    f ? { n: symbol, dn: "." + symbol, f, sf: "/" + f } : { n: symbol, dn: "." + symbol },
+  );
+  return rows.map((r) => ({ id: r.id, name: r.name, kind: r.kind, file: r.file, line: Number(r.line), endLine: Number(r.endLine) }));
+}
+
+const defLabel = (d: Def) => `${d.kind} ${d.name} — ${d.file}:${d.line}`;
+
+/** Por que não há definição: não existe, ou existe mas não neste arquivo. Nunca "(vazio)", que significa "definido e sem ligações". */
+async function missingDef(graph: GraphStore, symbol: string, file?: string): Promise<string> {
+  if (!file) return "Símbolo não encontrado. Tente graph_search.";
+  const elsewhere = await findDefs(graph, symbol);
+  return `Nenhuma definição de "${symbol}" em "${file}".` + (elsewhere.length ? ` Definições: ${elsewhere.slice(0, 10).map((d) => `${d.file}:${d.line}`).join(", ")}.` : " O nome não existe no grafo; tente graph_search.");
+}
+
+/**
+ * Chamadores ou chamados, por definição. Uma definição só: lista simples (como sempre). Várias: um bloco por definição,
+ * para o agente não atribuir a uma função os chamadores de outra de mesmo nome. Muitas: só as definições.
+ */
+async function walk(graph: GraphStore, dir: "callers" | "callees", symbol: string, depth: number, file?: string): Promise<string> {
+  const defs = await findDefs(graph, symbol, file);
+  if (!defs.length) return missingDef(graph, symbol, file);
+  if (defs.length > MAX_GROUPS) {
+    return `"${symbol}" tem ${defs.length} definições; os resultados de todas misturadas não dizem nada. ${FILE_HINT}\n` +
+      defs.slice(0, 40).map(defLabel).join("\n") + (defs.length > 40 ? `\n… e mais ${defs.length - 40}` : "");
+  }
+  const q = dir === "callers"
+    ? `MATCH (c:Symbol)-[:CALLS*1..${depth}]->(t:Symbol {id:$id}) RETURN DISTINCT c.name AS name, c.file AS file, c.startLine AS line LIMIT ${MAX_ROWS + 1}`
+    : `MATCH (s:Symbol {id:$id})-[:CALLS*1..${depth}]->(c:Symbol) RETURN DISTINCT c.name AS name, c.file AS file, c.startLine AS line LIMIT ${MAX_ROWS + 1}`;
+  const one = async (d: Def) => {
+    const rows = await graph.run(q, { id: d.id });
+    const more = rows.length > MAX_ROWS ? `\n(há mais resultados além de ${MAX_ROWS}; diminua depth ou restrinja com file)` : "";
+    return fmt(rows.slice(0, MAX_ROWS), ["name", "file", "line"]) + more;
+  };
+  if (defs.length === 1) return one(defs[0]);
+  const blocks: string[] = [];
+  for (const d of defs) blocks.push(`## ${defLabel(d)}\n${await one(d)}`);
+  return `"${symbol}" tem ${defs.length} definições; resultado por definição. ${FILE_HINT}\n\n${blocks.join("\n\n")}`;
+}
+
+const fileArg = z.string().optional().describe("Restringe à definição neste arquivo (caminho ou sufixo). Use quando o nome se repete em vários arquivos.");
+
 defineTool({
   name: "graph_callers",
   concurrent: true,
   readsGraph: true,
-  description: "Quem chama o símbolo (transitivo até depth). Use antes de alterar uma função para medir impacto.",
-  schema: z.object({ symbol: z.string(), depth: z.number().int().min(1).max(5).default(2) }),
-  async run({ symbol, depth }, { graph }) {
-    const rows = await graph.run(
-      `MATCH (c:Symbol)-[:CALLS*1..${depth}]->(t:Symbol) WHERE t.name = $n OR t.name ENDS WITH $dn RETURN DISTINCT c.name AS name, c.file AS file, c.startLine AS line LIMIT 60`,
-      { n: symbol, dn: "." + symbol },
-    );
-    return fmt(rows, ["name", "file", "line"]);
+  description: "Quem chama o símbolo (transitivo até depth). Use antes de alterar uma função para medir impacto. Se o nome tiver várias definições, o resultado vem agrupado por definição; use `file` para escolher uma.",
+  schema: z.object({ symbol: z.string(), depth: z.number().int().min(1).max(5).default(2), file: fileArg }),
+  async run({ symbol, depth, file }, { graph }) {
+    return walk(graph, "callers", symbol, depth, file);
   },
 });
 
@@ -52,14 +106,10 @@ defineTool({
   name: "graph_callees",
   concurrent: true,
   readsGraph: true,
-  description: "O que o símbolo chama (transitivo até depth). Use para entender um fluxo sem ler tudo.",
-  schema: z.object({ symbol: z.string(), depth: z.number().int().min(1).max(5).default(2) }),
-  async run({ symbol, depth }, { graph }) {
-    const rows = await graph.run(
-      `MATCH (s:Symbol)-[:CALLS*1..${depth}]->(c:Symbol) WHERE s.name = $n OR s.name ENDS WITH $dn RETURN DISTINCT c.name AS name, c.file AS file, c.startLine AS line LIMIT 60`,
-      { n: symbol, dn: "." + symbol },
-    );
-    return fmt(rows, ["name", "file", "line"]);
+  description: "O que o símbolo chama (transitivo até depth). Use para entender um fluxo sem ler tudo. Se o nome tiver várias definições, o resultado vem agrupado por definição; use `file` para escolher uma.",
+  schema: z.object({ symbol: z.string(), depth: z.number().int().min(1).max(5).default(2), file: fileArg }),
+  async run({ symbol, depth, file }, { graph }) {
+    return walk(graph, "callees", symbol, depth, file);
   },
 });
 
@@ -80,17 +130,19 @@ defineTool({
   concurrent: true,
   readsGraph: true,
   description: "Visão completa de um símbolo: onde está, quem chama, o que chama, e notas de memória relacionadas. Use ANTES de ler o arquivo inteiro.",
-  schema: z.object({ symbol: z.string() }),
-  async run({ symbol }, { graph, root }) {
-    const defs = await graph.run(`MATCH (s:Symbol) WHERE s.name = $n OR s.name ENDS WITH $dn RETURN s.id AS id, s.kind AS kind, s.file AS file, s.startLine AS a, s.endLine AS b LIMIT 5`, { n: symbol, dn: "." + symbol });
-    if (!defs.length) return "Símbolo não encontrado. Tente graph_search.";
+  schema: z.object({ symbol: z.string(), file: fileArg }),
+  async run({ symbol, file }, { graph, root }) {
+    const all = await findDefs(graph, symbol, file);
+    if (!all.length) return missingDef(graph, symbol, file);
+    const defs = all.slice(0, 5);
     const parts: string[] = [];
+    if (all.length > defs.length) parts.push(`"${symbol}" tem ${all.length} definições; mostrando ${defs.length}. ${FILE_HINT}\n` + all.slice(defs.length, 40).map(defLabel).join("\n"));
     for (const d of defs) {
       const callers = await graph.run(`MATCH (c:Symbol)-[:CALLS]->(:Symbol {id:$id}) RETURN c.name AS n, c.file AS f, c.startLine AS l LIMIT 15`, { id: d.id });
       const callees = await graph.run(`MATCH (:Symbol {id:$id})-[:CALLS]->(c:Symbol) RETURN c.name AS n, c.file AS f, c.startLine AS l LIMIT 15`, { id: d.id });
       const notes = await graph.run(`MATCH (n:Note) WHERE list_contains(n.refs, $name) OR list_contains(n.refs, $file) RETURN n.kind AS k, n.text AS t LIMIT 5`, { name: symbol, file: d.file });
       parts.push(
-        `## ${d.kind} ${d.id} (linhas ${d.a}-${d.b})\n` +
+        `## ${d.kind} ${d.id} (linhas ${d.line}-${d.endLine})\n` +
           `chamado por:\n${fmt(callers, ["n", "f", "l"])}\n` +
           `chama:\n${fmt(callees, ["n", "f", "l"])}\n` +
           `notas:\n${fmt(notes, ["k", "t"])}` +
