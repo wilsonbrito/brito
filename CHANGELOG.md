@@ -16,10 +16,10 @@
 - **Desktop: `/diagnostico` mostra onde o tempo dos últimos turnos foi** (roteamento local do Híbrido, espera do modelo, tools, reflexão, abertura do backend). Cada turno é gravado em `~/.brito/desktop-timing.jsonl` (últimas 500 linhas).
 - **Desktop: o indicador de trabalho mostra a fase** ("consultando o modelo local", "aguardando o modelo", "Executando <tool>") em vez de só "Trabalhando".
 
-## 0.20.3 — 2026-11-17
+## 0.20.3 — 2026-11-16
 
 ### Fixed
-- **A Árvore visual do app desktop volta a abrir ("chip is not defined").** `tree.js` e `panels.js` declaravam `const fmtTok` no mesmo escopo global; o `tree.js` falhava ao carregar e levava junto `chip`, `pct` e `quotesView`. O helper do `tree.js` virou `fmtTokTree`, e um teste novo barra declarações de topo duplicadas entre os scripts do renderer (#47).
+- **Painel Árvore do desktop voltou a abrir.** O painel mostrava "Erro: treeView is not defined". `tree.js` e `panels.js` declaravam o mesmo `const fmtTok`, e como os scripts do renderer dividem o escopo global, o `tree.js` falhava ao carregar ("Identifier 'fmtTok' has already been declared") e nenhuma função dele existia. O formatador do `tree.js` virou `treeFmtTok`. Quem já tem o app precisa instalar a nova versão.
 
 ## 0.20.2 — 2026-11-15
 

@@ -68,10 +68,10 @@ function treeNodes(snap) {
   return [txt("div", "sec2", "ÁRVORE (perguntas ❓ e respostas 💬; ✂️ = podada)"), root ? nodeView(snap, root, kids) : txt("div", "pmsg", "—")];
 }
 
-const fmtTokTree = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+const treeFmtTok = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 /** Gasto estimado (~4 caracteres por token) separado entre o SLM local (grátis) e o Claude (gasta cota/tokens). */
 function usageLine(u) {
-  const part = (label, m) => (m.calls ? `${label}: ${m.calls} chamada${m.calls === 1 ? "" : "s"}, ~${fmtTokTree(m.tokensIn)} entrada / ~${fmtTokTree(m.tokensOut)} saída` : "");
+  const part = (label, m) => (m.calls ? `${label}: ${m.calls} chamada${m.calls === 1 ? "" : "s"}, ~${treeFmtTok(m.tokensIn)} entrada / ~${treeFmtTok(m.tokensOut)} saída` : "");
   return ["tokens (estimativa)", part("SLM local", u.slm), part("Claude", u.claude)].filter(Boolean).join("  ·  ");
 }
 
@@ -97,7 +97,7 @@ function renderTreeOut() {
   if (run) { run.textContent = snap.done ? "Gerar árvore" : "Parar"; run.classList.toggle("stop", !snap.done); }
 }
 
-const fmtEst = (m) => (m.tokensIn || m.tokensOut ? `~${fmtTokTree(m.tokensIn)} entrada / ~${fmtTokTree(m.tokensOut)} saída` : "");
+const fmtEst = (m) => (m.tokensIn || m.tokensOut ? `~${treeFmtTok(m.tokensIn)} entrada / ~${treeFmtTok(m.tokensOut)} saída` : "");
 
 /** `/arvore [--slm|--hibrido|--claude|--demo] [--gens N] pergunta`: roda a árvore pelo chat e entrega a resposta final nele. */
 async function runTreeCommand(s, line) {
