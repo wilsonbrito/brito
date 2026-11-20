@@ -36,3 +36,16 @@ test("summarizeTimings aponta a fase que mais pesou", () => {
   assert.match(out, /mediana/);
   assert.match(summarizeTimings([]), /Ainda não há turnos/);
 });
+
+test("recordTiming corta o arquivo para as últimas linhas quando ele passa do limite, sem perder o fim nem corromper linhas", () => {
+  const f = tmpFile();
+  const N = 2300; // ~150 bytes por linha: passa de 300 KB perto da linha 2000 e dispara o corte para 500
+  for (let i = 0; i < N; i++) recordTiming(rec({ totalMs: i }), f);
+  const raw = fs.readFileSync(f, "utf8").split("\n").filter(Boolean);
+  assert.ok(raw.length < N && raw.length >= 500, `linhas: ${raw.length}`);
+  assert.equal(raw.length, readTimings(N, f).length, "toda linha é JSON válido");
+  assert.equal(readTimings(1, f)[0].totalMs, N - 1, "a última gravação sobrevive ao corte");
+  const ms = readTimings(N, f).map((x) => x.totalMs);
+  assert.deepEqual(ms, [...ms].sort((a, b) => a - b), "ordem preservada");
+  assert.equal(fs.readFileSync(f, "utf8").endsWith("\n"), true);
+});

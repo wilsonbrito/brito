@@ -58,12 +58,22 @@ export class TurnTimer {
 export function recordTiming(t: TurnTiming, file = timingFile()): void {
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.appendFileSync(file, JSON.stringify(t) + "\n");
-    const size = fs.statSync(file).size;
-    if (size > KEEP * 600) {
-      const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
-      fs.writeFileSync(file, lines.slice(-KEEP).join("\n") + "\n");
-    }
+    // Um único descritor para medir, ler e reescrever: checar o tamanho por caminho e depois ler por caminho deixa o arquivo
+    // mudar no meio (CodeQL: corrida entre checar e usar). Sem O_APPEND, porque o Windows não deixa truncar um descritor assim.
+    const fd = fs.openSync(file, fs.constants.O_RDWR | fs.constants.O_CREAT, 0o600);
+    try {
+      const line = Buffer.from(JSON.stringify(t) + "\n");
+      let size = fs.fstatSync(fd).size;
+      fs.writeSync(fd, line, 0, line.length, size);
+      size += line.length;
+      if (size > KEEP * 600) {
+        const buf = Buffer.alloc(size);
+        fs.readSync(fd, buf, 0, size, 0);
+        const kept = Buffer.from(buf.toString("utf8").split("\n").filter(Boolean).slice(-KEEP).join("\n") + "\n");
+        fs.ftruncateSync(fd, 0);
+        fs.writeSync(fd, kept, 0, kept.length, 0);
+      }
+    } finally { fs.closeSync(fd); }
   } catch { /* diagnóstico é opcional */ }
 }
 
