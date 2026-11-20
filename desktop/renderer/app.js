@@ -174,6 +174,7 @@ const cached = (anchor, ver, build) => {
 };
 const emptyNode = el("div", "empty", "<h1>Brito</h1><div>O que vamos construir?</div>");
 const spinNode = el("div", "note spin", "Trabalhando");
+const spinLabel = (s) => { const r = runtime(s.id); const run = [...s.items].reverse().find((x) => x.k === "tool" && !x.done); return run ? `Executando ${run.name}` : r.phase || "Trabalhando"; };
 
 function renderMessages() {
   const s = active();
@@ -202,7 +203,7 @@ function renderMessages() {
         }));
       } else { nodes.push(cached(it, it.v, () => { const n = el("div", `note ${it.k}`); n.textContent = it.msg; return n; })); i++; }
     }
-    if (runtime(s.id).busy) nodes.push(spinNode);
+    if (runtime(s.id).busy) { const l = spinLabel(s); if (spinNode.textContent !== l) spinNode.textContent = l; nodes.push(spinNode); }
   }
   // reconcilia no lugar: nós reaproveitados não são recriados (mantém seleção de texto e scroll)
   nodes.forEach((n, idx) => { if (box.children[idx] !== n) box.insertBefore(n, box.children[idx] ?? null); });
@@ -380,7 +381,8 @@ function onEvent(sessionId, ev) {
         if (typeof ev.orchMode === "string") { s.settings.orch = ev.orchMode; if (s.id === state.activeId) $("orch").value = ev.orchMode; }
       }
       if (s.claudeId !== ev.sessionId) s.claudeId = ev.sessionId; loadModels(sessionId); break;
-    case "turnStart": r.busy = true; s.lastError = false; break;
+    case "phase": r.phase = ev.label; break;
+    case "turnStart": r.busy = true; r.phase = ""; s.lastError = false; break;
     // os pedaços do mesmo bloco se juntam num item só (streaming); textEnd fecha o bloco
     case "text": { const l = s.items[s.items.length - 1]; if (l?.k === "text" && l.open) { l.text += ev.text; bump(l); } else s.items.push({ k: "text", text: ev.text, open: true }); break; }
     case "textEnd": { const l = s.items[s.items.length - 1]; if (l?.k === "text") l.open = false; break; }
@@ -402,7 +404,7 @@ function onEvent(sessionId, ev) {
     }
     case "warn": case "error": if (ev.t === "error") s.lastError = true; note(s, ev.t, ev.msg); break;
     case "approval": r.approvals.push(ev); if (sessionId === state.activeId) showApproval(); break;
-    case "turnEnd": r.busy = false; s.updated = Date.now(); if (sessionId !== state.activeId) s.unread = true; break;
+    case "turnEnd": r.busy = false; r.phase = ""; s.updated = Date.now(); if (sessionId !== state.activeId) s.unread = true; if (r.queue?.length) setTimeout(() => drainQueue(sessionId), 0); break;
     case "usage": r.usage = { contextTokens: ev.contextTokens, costUsd: ev.costUsd, contextWindow: ev.contextWindow, tokens: ev.usage, slm: ev.slm, hybrid: ev.hybrid }; r.model = ev.model; r.fallback = !!ev.fallback; r.chip = ev.chip; if (ev.sessionId) s.claudeId = ev.sessionId; break;
     case "closed": r.backend = "off"; if (r.busy || (ev.code && ev.code !== 0)) note(s, "warn", `O backend encerrou${ev.code ? ` (código ${ev.code})` : ""}. Envie outra mensagem para reconectar; a conversa é retomada.${ev.stderr ? `\n${ev.stderr}` : ""}`); r.busy = false; for (const t of s.items) { if (t.k === "text" || t.k === "skill") t.open = false; if (t.k === "tool" && !t.done) { t.done = true; t.isError = true; bump(t); } } break;
   }
@@ -422,11 +424,29 @@ async function ensureBackend(s) {
   return true;
 }
 
+/** Mensagem digitada com o agente ocupado: entra na fila (como no terminal) e segue quando o turno termina. */
+function enqueue(s, text) {
+  const r = runtime(s.id);
+  (r.queue ??= []).push(text);
+  note(s, "info", `↳ na fila: ${text.split("\n")[0].slice(0, 60)}`);
+  persist(); renderAll();
+}
+function drainQueue(sessionId) {
+  const s = state.sessions.find((x) => x.id === sessionId);
+  const r = s && runtime(sessionId);
+  if (!r || r.busy || !r.queue?.length) return;
+  const next = r.queue.shift();
+  if (sessionId === state.activeId) sendMessage(next); else sendMessageTo(s, next);
+}
 async function sendMessage(text) {
   const s = active();
-  if (!s || !text.trim()) return;
+  if (!s) return;
+  return sendMessageTo(s, text);
+}
+async function sendMessageTo(s, text) {
+  if (!text.trim()) return;
   const r = runtime(s.id);
-  if (r.busy) return;
+  if (r.busy) return enqueue(s, text);
   s.items.push({ k: "user", text });
   if (s.title === "Nova sessão") s.title = text.replace(/\s+/g, " ").slice(0, 48);
   s.updated = Date.now();
@@ -468,6 +488,7 @@ function answer(allow, scope) {
 const LOCAL_CMDS = [
   { name: "arvore", description: "árvore de perguntas e respostas sobre os arquivos do projeto", kind: "builtin" },
   { name: "clear", description: "limpa a conversa", kind: "builtin" },
+  { name: "diagnostico", description: "onde o tempo dos últimos turnos foi (roteamento, modelo, tools, reflexão)", kind: "builtin" },
   { name: "fallback", description: "estado do fallback Claude → modelo local", kind: "builtin" },
   { name: "help", description: "lista os comandos", kind: "builtin" },
 ];
@@ -528,16 +549,21 @@ async function clearSession() {
 }
 $("send").onclick = () => {
   const s = active();
-  if (s && runtime(s.id).busy) return api.write(s.id, { t: "abort" });
   const t = composerInput.value;
+  if (s && runtime(s.id).busy) {
+    if (!t.trim()) return api.write(s.id, { t: "abort" }); // botão ■ / Enter com o campo vazio interrompe
+    composerInput.value = ""; autosize();
+    return enqueue(s, t.trim()); // com texto: entra na fila; Esc interrompe
+  }
   composerInput.value = ""; autosize();
   if (t.trim()) { hist.push(t); histPos = -1; }
   if (t.trim() === "/clear") return clearSession();
   if (t.trim() === "/help" && s) {
-    note(s, "info", "/ abre comandos e skills · /arvore [--slm|--hibrido|--claude|--demo] [--gens 1-3] pergunta · @ procura arquivos do projeto · arraste ou cole (Ctrl+V) arquivos e imagens no campo · ↑/↓ histórico · Esc interrompe · Ctrl+N nova sessão · /clear limpa · /fallback mostra o motor");
+    note(s, "info", "/ abre comandos e skills · /arvore [--slm|--hibrido|--claude|--demo] [--gens 1-3] pergunta · @ procura arquivos do projeto · arraste ou cole (Ctrl+V) arquivos e imagens no campo · ↑/↓ histórico · Esc interrompe · Ctrl+N nova sessão · /clear limpa · /fallback mostra o motor · /diagnostico mostra onde o tempo dos turnos foi · Enter com o agente ocupado põe na fila");
     persist(); return renderAll();
   }
   if (/^\/arvore(\s|$)/.test(t.trim()) && s) return runTreeCommand(s, t.trim());
+  if (t.trim() === "/diagnostico" && s) return sendMessage("/diagnostico");
   sendMessage(t);
 };
 composerInput.addEventListener("keydown", (e) => {

@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Desktop: mensagem enviada logo depois de um turno longo não é mais descartada.** A reflexão pós-turno (skills) rodava dentro do turno ocupado; um pedido enviado nesse intervalo recebia "já existe um turno em andamento" e sumia, deixando o app girando. Agora a reflexão roda em segundo plano e pedidos que chegam com o backend ocupado entram numa fila.
+- **Desktop: Enter com o agente ocupado põe a mensagem na fila** (como no terminal) em vez de interromper o turno. Esc ou o botão ■ com o campo vazio interrompem.
+
+- **Grafo: `graph_callers` e `graph_impact` não devolvem mais vazio para o que o indexador de TS/JS não enxergava.** Medido no próprio repositório: as 20 classes instanciadas com `new` apareciam com 0 chamadores, e `serve.ts`, `migrate.ts` e `claude-code.ts` com 0 importadores (o `cli.ts` os carrega com `import()`). Agora contam: `new Classe()`, `import()` e `require()` (inclusive com destructuring), `export { x } from` / `export * from` (o import via barrel segue o reexport em vez de cair na heurística por nome, que errava quando o nome se repetia) e chamadas soltas no corpo do módulo (símbolo `<módulo>`, criado só quando a chamada acha alvo no projeto). Funções sem chamador no repo: 113 → 88. Os projetos reindexam sozinhos na primeira consulta (indexador v8).
+
+- **Grafo: `graph_callers`, `graph_callees` e `graph_context` não misturam mais definições de mesmo nome.** No repositório, 59 nomes são compartilhados por 189 símbolos (`run` tem 30 definições em 12 arquivos); os chamadores de todas vinham numa lista só, sem dizer de qual. Agora, com mais de uma definição, o resultado vem agrupado por definição; com mais de 8, só a lista de definições, pedindo o novo parâmetro `file` (caminho ou sufixo por segmento) para escolher uma. Com uma definição só, a saída é a mesma de antes. Também deixam de dar "(vazio)" para um símbolo que não existe (diz que não foi encontrado e, com `file`, onde o nome está definido) e avisam quando o resultado é cortado em 60 linhas.
+
+- **Grafo: métodos de objeto literal anônimo deixam de ser símbolos.** `defineTool({ run() {} })`, `return { async ask() {} }` e objetos com tipo declarado (`const b: Backend = {…}`) viravam símbolos soltos (`run`, `ask`, `model`): 54 no repositório, 28 só `run`. Quem os chama usa uma interface, então o nome não identifica nada, e quase todas as 60 arestas que chegavam neles eram falsas (a heurística por nome ligava `graph.run()` ao `run` do defineTool do mesmo arquivo). Agora o corpo conta para quem contém o objeto (a fábrica ou o módulo, que aparece como `<módulo>`). Objeto atribuído a variável sem tipo (`const api = { buscar() {} }`) segue como módulo, com os métodos como símbolos. Efeito: `run` passou de 30 definições para 2, e `GraphStore.run`, que aparecia com 2 chamadores, tem 30. Limite conhecido: sem inferência de tipos, `store.run()` ainda é atribuído às duas definições restantes (`GraphStore.run` e `Agent.run`).
+
+### Added
+- **Desktop: `/diagnostico` mostra onde o tempo dos últimos turnos foi** (roteamento local do Híbrido, espera do modelo, tools, reflexão, abertura do backend). Cada turno é gravado em `~/.brito/desktop-timing.jsonl` (últimas 500 linhas).
+- **Desktop: o indicador de trabalho mostra a fase** ("consultando o modelo local", "aguardando o modelo", "Executando <tool>") em vez de só "Trabalhando".
+
 ## 0.20.3 — 2026-11-16
 
 ### Fixed

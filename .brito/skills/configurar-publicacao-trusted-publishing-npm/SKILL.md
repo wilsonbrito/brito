@@ -2,15 +2,16 @@
 name: configurar-publicacao-trusted-publishing-npm
 description: Como configurar a publicação do brito-cli no npm usando Trusted Publishing (sem token), confiando no GitHub Actions para autenticação
 version: 1
-uses: 2
+uses: 3
 created: 2026-11-08
 updated: 2026-11-08
-lastUsed: 2026-11-10
+lastUsed: 2026-11-14
 refs: brito-cli
 status: trial
 origin: auto
 wins: 1
-losses: 0
+losses: 1
+lastLoss: Bash falhou (<tool_use_error>Blocked: sleep 60 followed by: gh pr checks 41 head -12. To wait for a condition, use Monitor with an until-loop (e.g. `until <check>; do sleep 2; done`). To wait for a co
 ---
 ## Quando usar
 Quando você deseja publicar versões do brito-cli no npm sem gerar um token de acesso, usando a autenticação confiável via GitHub Actions.
