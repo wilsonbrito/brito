@@ -69,6 +69,21 @@ function extract(root: Parser.SyntaxNode, lang: Lang, file: string): { syms: Sym
     return null;
   };
 
+  /** `import("./x")` ou `require("./x")` com literal de texto → "./x". */
+  const moduleSpecOf = (call: Parser.SyntaxNode): string | null => {
+    const fn = call.childForFieldName("function");
+    if (!fn || (fn.type !== "import" && !(fn.type === "identifier" && fn.text === "require"))) return null;
+    const arg = call.childForFieldName("arguments")?.namedChildren[0];
+    return arg?.type === "string" ? arg.text.slice(1, -1) : null;
+  };
+  /** Valor de uma declaração que carrega módulo: `await import("./x")` ou `require("./x")` (um `import()` sem await é Promise). */
+  const loadedSpec = (val: Parser.SyntaxNode): string | null => {
+    const v = val.type === "await_expression" ? val.namedChildren[0] : val;
+    if (!v || v.type !== "call_expression") return null;
+    if (val.type !== "await_expression" && v.childForFieldName("function")?.type === "import") return null;
+    return moduleSpecOf(v);
+  };
+
   const walk = (n: Parser.SyntaxNode, owner: Sym | null, cls: string | null) => {
     let nextOwner = owner;
     let nextCls = cls;
@@ -95,6 +110,38 @@ function extract(root: Parser.SyntaxNode, lang: Lang, file: string): { syms: Sym
         const name = n.childForFieldName("name");
         const val = n.childForFieldName("value");
         if (name?.type === "identifier" && val && FN_VALUES.has(val.type)) nextOwner = mk(name.text, "function", n);
+        // `const { a, b: c } = await import("./x")` / `const m = require("./x")`: os nomes viram bindings do módulo
+        const spec = val && name && !isPy ? loadedSpec(val) : null;
+        if (spec && name) {
+          if (name.type === "identifier") bindings.push([name.text, spec, "*"]);
+          else if (name.type === "object_pattern") {
+            for (const p of name.namedChildren) {
+              if (p.type === "shorthand_property_identifier_pattern") bindings.push([p.text, spec, p.text]);
+              else if (p.type === "pair_pattern") {
+                const key = p.childForFieldName("key")?.text, v = p.childForFieldName("value");
+                if (key && v?.type === "identifier") bindings.push([v.text, spec, key]);
+              }
+            }
+          }
+        }
+        break;
+      }
+      case "new_expression": { // `new Servico()`: instanciar é usar a classe (antes só call_expression contava)
+        const c = calleeOf(n.childForFieldName("constructor"));
+        if (c) calls.push({ callerId: owner?.id ?? null, callee: c.name, obj: c.obj, file });
+        break;
+      }
+      case "export_statement": { // `export { a as b } from "./x"` e `export * from "./x"` (barrel): é import e reexport
+        const src = n.childForFieldName("source")?.text.replace(/['"]/g, "");
+        if (!src) break;
+        imports.push(src);
+        const clause = n.namedChildren.find((c) => c.type === "export_clause");
+        if (clause) {
+          for (const sp of clause.namedChildren) {
+            const nm = sp.type === "export_specifier" ? sp.childForFieldName("name")?.text : null;
+            if (nm) bindings.push([REEXPORT + (sp.childForFieldName("alias")?.text ?? nm), src, nm]);
+          }
+        } else if (!n.namedChildren.some((c) => c.type === "namespace_export")) bindings.push([`${REEXPORT}*:${src}`, src, "*"]);
         break;
       }
       case "interface_declaration":
@@ -106,7 +153,10 @@ function extract(root: Parser.SyntaxNode, lang: Lang, file: string): { syms: Sym
       }
       case "call_expression":
       case "call": {
-        const c = calleeOf(n.childForFieldName("function"));
+        const fn = n.childForFieldName("function");
+        const dyn = !isPy ? moduleSpecOf(n) : null; // import("./x") e require("./x") são imports, não chamadas
+        if (dyn) { imports.push(dyn); break; }
+        const c = calleeOf(fn);
         if (c) calls.push({ callerId: owner?.id ?? null, callee: c.name, obj: c.obj, file });
         break;
       }
@@ -176,7 +226,11 @@ function resolveImport(from: string, spec: string, known: Set<string>, aliases?:
   return null;
 }
 
-const INDEXER_VERSION = "v7";
+const INDEXER_VERSION = "v8";
+/** Reexports (`export { x } from`) ficam na lista de bindings com este prefixo no nome local: ":" não existe em identificador, então não colide. */
+const REEXPORT = "export:";
+/** Quem faz as chamadas soltas no corpo do módulo (scripts, setup, `if __name__ == "__main__"`). Só existe nos arquivos que têm alguma. */
+const TOP_NAME = "<módulo>";
 const TYPE_KINDS = new Set(["class", "interface", "struct", "trait", "enum", "module", "type"]);
 const JS_LIKE_RE = /\.(m|c)?[jt]sx?$|\.py$|\.svelte$|\.vue$|\.astro$/;
 const SEP = "\t";
@@ -323,6 +377,12 @@ async function indexProjectLocked(root: string, store: GraphStore, opts: IndexOp
       info = isExtraLang(lang) ? extractLang(tree.rootNode, lang, rel) : extract(tree.rootNode, lang, rel);
       tree.delete();
     }
+    // Chamada fora de qualquer função não tinha dono e era descartada. Vira chamada de um símbolo do módulo, mas só se o alvo é
+    // algo do arquivo ou importado (console.log e afins não criam símbolo).
+    const own = new Set(info.syms.map((s) => s.name.split(".").pop()!));
+    const bound = new Set(info.bindings.map((b) => b[0]));
+    const top = info.calls.filter((c) => !c.callerId && (own.has(c.callee) || bound.has(c.callee) || bound.has(c.obj)));
+    for (const c of top) c.callerId = `${rel}::${TOP_NAME}:1`; // o símbolo só nasce na resolução, se alguma chamada achar alvo no projeto
     if (sfc) {
       const name = componentName(rel);
       const comp: Sym = { id: `${rel}::${name}:1`, name, kind: "component", file: rel, startLine: 1, endLine: src.split("\n").length };
@@ -392,6 +452,25 @@ async function indexProjectLocked(root: string, store: GraphStore, opts: IndexOp
     bindingsOf.set(file, m);
   }
 
+  /**
+   * Onde `name` está definido de verdade, seguindo reexports (`export { x } from`, `export * from`) a partir de `file`.
+   * Sem isto um import via barrel não achava o símbolo e caía na heurística por nome, que erra quando o nome se repete.
+   */
+  const definedAt = (file: string, name: string, seen = new Set<string>()): { file: string; name: string }[] => {
+    if (lookup(file, name).length) return [{ file, name }];
+    const key = file + SEP + name;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    const bs = bindingsOf.get(file);
+    if (!bs) return [];
+    const out: { file: string; name: string }[] = [];
+    const named = bs.get(REEXPORT + name);
+    if (named) for (const tf of resolveAll(file, named.spec)) out.push(...definedAt(tf, named.imported === "default" ? name : named.imported, seen));
+    if (!out.length) for (const [local, b] of bs) if (local.startsWith(`${REEXPORT}*:`)) for (const tf of resolveAll(file, b.spec)) out.push(...definedAt(tf, name, seen));
+    return out;
+  };
+  const lookupVia = (file: string, name: string) => definedAt(file, name).flatMap((t) => lookup(t.file, t.name));
+
   /** Fallback por nome: só aceita se o conjunto de candidatos for pequeno. */
   const heuristic = (file: string, callee: string, member: boolean) => {
     // chamada `x.foo()` só pode ser método; `foo()` só pode ser função/classe
@@ -411,7 +490,7 @@ async function indexProjectLocked(root: string, store: GraphStore, opts: IndexOp
         const tfs = resolveAll(file, b.spec);
         if (!tfs.length && !b.spec.startsWith(".")) return []; // pacote externo (não é relativo nem alias do projeto)
         const want = b.imported === "default" ? callee : b.imported;
-        let ids = tfs.flatMap((tf) => lookup(tf, want));
+        let ids = tfs.flatMap((tf) => lookupVia(tf, want));
         if (!ids.length && !jsLike(file)) ids = tfs.flatMap((tf) => lookupShort(tf, want));
         return ids.length ? ids : heuristic(file, callee, false); // re-export/barrel: cai no fallback
       }
@@ -434,7 +513,7 @@ async function indexProjectLocked(root: string, store: GraphStore, opts: IndexOp
     if (b) {
       const tfs = resolveAll(file, b.spec);
       if (!tfs.length && !b.spec.startsWith(".")) return []; // fs.readFileSync, z.string()…
-      const ids = tfs.flatMap((tf) => lookup(tf, callee).concat(lookup(tf, `${b.imported}.${callee}`)));
+      const ids = tfs.flatMap((tf) => lookupVia(tf, callee).concat(b.imported === "*" ? [] : definedAt(tf, b.imported).flatMap((t) => lookup(t.file, `${t.name}.${callee}`))));
       if (ids.length) return ids;
     }
     const typed = viaTypeName(obj, callee);
@@ -455,10 +534,23 @@ async function indexProjectLocked(root: string, store: GraphStore, opts: IndexOp
   const haveCalls = new Set((await store.run("MATCH (a:Symbol)-[:CALLS]->(b:Symbol) RETURN a.id AS a, b.id AS b")).map((r) => r.a + SEP + r.b));
   const haveImports = new Set((await store.run("MATCH (a:File)-[:IMPORTS]->(b:File) RETURN a.path AS a, b.path AS b")).map((r) => r.a + SEP + r.b));
 
+  // Símbolos de módulo: criados aqui, só para quem tem aresta de chamada resolvida (console.log, pacote externo e afins ficam sem).
+  for (const k of wantCalls) {
+    const callerId = k.slice(0, k.indexOf(SEP));
+    if (!callerId.endsWith(`::${TOP_NAME}:1`)) continue;
+    const file = callerId.slice(0, callerId.indexOf("::"));
+    if (lookup(file, TOP_NAME).length) continue;
+    const lines = current.get(file)?.src.split("\n").length ?? 1;
+    await store.run("MATCH (f:File {path:$f}) CREATE (f)-[:DEFINES]->(:Symbol {id:$id, name:$n, kind:'toplevel', file:$f, startLine:1, endLine:$e})", { id: callerId, n: TOP_NAME, f: file, e: lines });
+    (symByFile.get(file) ?? symByFile.set(file, new Map()).get(file)!).set(TOP_NAME, [callerId]);
+  }
   for (const k of wantCalls) if (!haveCalls.has(k)) { const [a, b] = k.split(SEP); await store.run("MATCH (x:Symbol {id:$a}), (y:Symbol {id:$b}) CREATE (x)-[:CALLS]->(y)", { a, b }); }
   for (const k of haveCalls) if (!wantCalls.has(k)) { const [a, b] = k.split(SEP); await store.run("MATCH (x:Symbol {id:$a})-[r:CALLS]->(y:Symbol {id:$b}) DELETE r", { a, b }); }
   for (const k of wantImports) if (!haveImports.has(k)) { const [a, b] = k.split(SEP); await store.run("MATCH (x:File {path:$a}), (y:File {path:$b}) CREATE (x)-[:IMPORTS]->(y)", { a, b }); }
   for (const k of haveImports) if (!wantImports.has(k)) { const [a, b] = k.split(SEP); await store.run("MATCH (x:File {path:$a})-[r:IMPORTS]->(y:File {path:$b}) DELETE r", { a, b }); }
+
+  // Módulo que deixou de ter chamada resolvida (o alvo sumiu): o símbolo some junto.
+  await store.run("MATCH (s:Symbol {kind:'toplevel'}) WHERE NOT EXISTS { MATCH (s)-[:CALLS]->(:Symbol) } DETACH DELETE s");
 
   return { ...(await totals()), ...delta };
 }

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { defineTool } from "./registry.js";
-import { bumpUses, deleteSkill, getSkill, listPending, saveSkill, suggestSkills, validate } from "../skills/store.js";
+import { bumpUses, deleteSkill, getSkill, listPending, relativizeInput, saveSkill, suggestSkills, validate } from "../skills/store.js";
 import { saveAuto } from "../skills/trial.js";
 import { describeSave } from "../skills/describe.js";
 import { perms } from "../permissions.js";
@@ -37,7 +37,9 @@ defineTool({
   }),
   dangerous: true,
   describe: (i, ctx) => describeSave(ctx.root, i),
-  async run({ name, description, body, refs, scope, reason, invoke, model }, ctx) {
+  async run(args, ctx) {
+    const { name, scope, reason, invoke, model } = args;
+    const { description, body, refs } = relativizeInput(ctx.root, { name, description: args.description, body: args.body, refs: args.refs });
     validate({ name, description, body });
     // Em bypass nada pede aprovação: usa a mesma política segura da reflexão autônoma (em teste; o arriscado vai para a fila de revisão).
     if (perms.mode === "bypass") return saveAuto(ctx.root, { name, description, body, refs, reason }).msg;

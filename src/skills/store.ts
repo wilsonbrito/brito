@@ -171,6 +171,29 @@ const LINT_RULES: { re: RegExp; msg: string; redact?: boolean }[] = [
   { re: /\b(sem|n[ãa]o|nunca|jamais)\s+(pe[çc]a|pedir|solicit(e|ar)|precisa)[^\n]{0,20}(aprova[çc][ãa]o|permiss[ãa]o|confirma[çc][ãa]o)|\b(pular|ignorar|burlar|desativar)\s+(a\s+)?(aprova[çc][ãa]o|permiss[ãa]o|permiss[õo]es)|\bskip\s+(the\s+)?(approval|permission)/i, msg: "dá instruções sobre pular aprovação/permissões" },
 ];
 
+/**
+ * Em vez de recusar a skill por causa de caminho absoluto, o Brito corrige sozinho: o que está dentro do projeto vira
+ * relativo; o resto do home do usuário vira `~/`. O usuário não precisa (nem consegue) arrumar isso.
+ */
+export function relativizePaths(root: string, text: string): string {
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const base = root.replace(/[\\/]+$/, "");
+  const rootRe = new RegExp(`${esc(base).replace(/\\\\|\//g, "[\\\\/]")}[\\\\/]?`, "gi");
+  return text
+    .replace(rootRe, "")
+    .replace(/[A-Za-z]:[\\/]Users[\\/][^\s\\/]+[\\/]?/g, "~/")
+    .replace(/\/(Users|home)\/[^\s/]+\/?/g, "~/");
+}
+
+export function relativizeInput<T extends SkillInput>(root: string, input: T): T {
+  return {
+    ...input,
+    description: relativizePaths(root, input.description),
+    body: relativizePaths(root, input.body),
+    ...(input.refs ? { refs: input.refs.map((r) => relativizePaths(root, r)) } : {}),
+  };
+}
+
 /** Troca segredos, credenciais e caminhos absolutos por [redigido]: para texto que vai ser guardado em disco (ex.: journal). */
 export function redact(text: string): string {
   return LINT_RULES.filter((r) => r.redact).reduce((t, r) => t.replace(new RegExp(r.re.source, r.re.flags.includes("g") ? r.re.flags : r.re.flags + "g"), "[redigido]"), text);
@@ -244,9 +267,10 @@ export function targetScope(root: string, name: string, scope?: Scope): Scope {
  * uma skill em teste zera o placar (conteúdo novo = hipótese nova). Sem `auto`, um humano aprovou: vira ativa e manual.
  */
 export function saveSkill(root: string, input: SkillInput, scope?: Scope, opts: { auto?: boolean; by?: string } = {}): { created: boolean; version: number; scope: Scope } {
+  input = relativizeInput(root, input);
   validate(input);
   const target = targetScope(root, input.name, scope);
-  const prev = getSkillIn(root, input.name, target);
+  const prev =getSkillIn(root, input.name, target);
   if (prev) {
     const hist = path.join(dirOf(root, target), input.name, "history");
     fs.mkdirSync(hist, { recursive: true });
@@ -282,6 +306,7 @@ const pendingFile = (root: string, scope: Scope, name: string) => path.join(dirO
 export interface PendingSkill extends SkillInput { scope: Scope; reason: string }
 
 export function savePending(root: string, input: SkillInput & { reason: string }, scope?: Scope): Scope {
+  input = relativizeInput(root, input);
   validate(input);
   const target = targetScope(root, input.name, scope);
   const file = pendingFile(root, target, input.name);

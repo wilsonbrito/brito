@@ -6,6 +6,8 @@
 - **Desktop: mensagem enviada logo depois de um turno longo não é mais descartada.** A reflexão pós-turno (skills) rodava dentro do turno ocupado; um pedido enviado nesse intervalo recebia "já existe um turno em andamento" e sumia, deixando o app girando. Agora a reflexão roda em segundo plano e pedidos que chegam com o backend ocupado entram numa fila.
 - **Desktop: Enter com o agente ocupado põe a mensagem na fila** (como no terminal) em vez de interromper o turno. Esc ou o botão ■ com o campo vazio interrompem.
 
+- **Grafo: `graph_callers` e `graph_impact` não devolvem mais vazio para o que o indexador de TS/JS não enxergava.** Medido no próprio repositório: as 20 classes instanciadas com `new` apareciam com 0 chamadores, e `serve.ts`, `migrate.ts` e `claude-code.ts` com 0 importadores (o `cli.ts` os carrega com `import()`). Agora contam: `new Classe()`, `import()` e `require()` (inclusive com destructuring), `export { x } from` / `export * from` (o import via barrel segue o reexport em vez de cair na heurística por nome, que errava quando o nome se repetia) e chamadas soltas no corpo do módulo (símbolo `<módulo>`, criado só quando a chamada acha alvo no projeto). Funções sem chamador no repo: 113 → 88. Os projetos reindexam sozinhos na primeira consulta (indexador v8).
+
 ### Added
 - **Desktop: `/diagnostico` mostra onde o tempo dos últimos turnos foi** (roteamento local do Híbrido, espera do modelo, tools, reflexão, abertura do backend). Cada turno é gravado em `~/.brito/desktop-timing.jsonl` (últimas 500 linhas).
 - **Desktop: o indicador de trabalho mostra a fase** ("consultando o modelo local", "aguardando o modelo", "Executando <tool>") em vez de só "Trabalhando".

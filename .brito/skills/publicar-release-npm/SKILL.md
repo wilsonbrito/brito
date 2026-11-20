@@ -1,35 +1,46 @@
 ---
 name: publicar-release-npm
-description: Como fechar e publicar uma versão do brito-cli no npm: bump de versão, CHANGELOG/README, typecheck, testes, dry-run do pacote, checar login e publicar.
-version: 1
-uses: 6
+description: Como fechar e publicar uma versão do brito-cli: bump, CHANGELOG/README, validação, PR, merge, tag vX.Y.Z (o CI gera instaladores e publica no npm).
+version: 4
+uses: 9
 created: 2026-10-30
-updated: 2026-10-30
-lastUsed: 2026-11-10
-refs: package.json, CHANGELOG.md, README.md
+updated: 2026-11-17
+lastUsed: 2026-11-15
+refs: 
 status: active
 origin: manual
-wins: 3
-losses: 0
+wins: 4
+losses: 2
+lastLoss: Skill falhou (<tool_use_error>Unknown skill: publicar-release-npm</tool_use_error>) e o turno terminou funcionando
 ---
 ## Quando usar
-Ao fechar uma versão do brito-cli e publicar no npm (ex.: "vamos subir no npm").
+Ao fechar uma versão do brito-cli e publicar (ex.: "vamos subir a versão"). A publicação no npm é feita pelo CI ao empurrar a tag `vX.Y.Z` (workflow `.github/workflows/desktop.yml`, Trusted Publisher, `npm publish --provenance`). Não há `npm login` local.
 
 ## Passos
-1. Veja o estado: `npm view brito-cli version` (versão publicada), `git status --short`, `git diff HEAD --stat`.
-2. Separe o que NÃO entra na release (WIP): salve um patch antes de reverter (`git diff HEAD -- <arquivo> > /tmp/x.patch`) e só então `git checkout HEAD -- <arquivo>`. Para reaplicar depois: `git apply /tmp/x.patch`.
-3. Bump sem tag: `npm version X.Y.Z --no-git-tag-version` (atualiza package.json e package-lock.json).
-4. CHANGELOG.md: seção `## X.Y.Z — AAAA-MM-DD` com `### Added`/`### Changed`/`### Fixed`. Se uma versão não publicada foi absorvida pela seguinte (ex.: 0.3.3 → 0.4.0), junte as entradas em UMA seção e remova os blocos repetidos.
-5. README.md: atualize as features/flags novas (descrições de comandos, variáveis como `BRITO_SKILLS`).
-6. Valide: `npx tsc --noEmit && npm test 2>&1 | grep -E "^# (pass|fail)|^not ok"`.
-7. Dry-run: `npm publish --dry-run` (ou `npm pack --dry-run`) e confira nome, versão, número de arquivos e tamanho.
-8. `npm whoami`. Se der E401, NÃO tente logar: peça ao usuário para rodar `npm login` (exige código de verificação dele) e depois `npm publish`.
-9. Depois de publicar: `npm view brito-cli version` precisa mostrar a versão nova.
+1. Estado: `npm view brito-cli version`, `node -p "require('./package.json').version"`, `git branch --show-current`, `git status --short`, `git tag --sort=-v:refname | head -4`.
+2. Confira se a branch atual já foi mergeada: `git fetch origin -q && git merge-base --is-ancestor HEAD origin/main && echo já-no-main`. Se já está no main, crie branch nova a partir dele (`git checkout -b feat/xxx origin/main`); o WIP não commitado vai junto para a nova branch.
+3. Bump sem tag: `npm version X.Y.Z --no-git-tag-version` (package.json e package-lock.json). `desktop/package.json` tem versão própria e NÃO acompanha a da CLI.
+4. CHANGELOG.md: seção `## X.Y.Z — AAAA-MM-DD` com Added/Changed/Fixed. Se entradas de uma versão anterior já publicada foram coladas na nova seção por engano, confira que a anterior voltou a ter só as suas.
+5. README.md e README.pt-BR.md: atualize as duas se a mudança for visível ao usuário (novidades, comandos, variáveis); correção interna só precisa de CHANGELOG.
+6. Valide: `npx tsc --noEmit`, `npm test`, `npm run build`, `npm pack --dry-run` (confira `brito-cli@X.Y.Z` e tamanho). Se mexeu em `desktop/package.mjs`, rode também `node desktop/package.mjs` localmente (mas veja a armadilha do macOS).
+7. `git status --short` antes de commitar: faça `git add` só dos arquivos da release. WIP alheio (ex.: `.brito/skills/*`, `src/` não relacionado) fica de fora.
+8. Commit, `git push -u origin <branch>`, `gh pr create --base main`.
+9. Espere o CI: `timeout 540 gh pr checks <N> --watch --interval 20 | tail -12`.
+10. `gh pr merge <N> --merge`, depois `git fetch origin main --tags` e confira a versão em `origin/main:package.json`.
+11. Tag anotada no main remoto: `git tag -a vX.Y.Z origin/main -m "brito-cli X.Y.Z" && git push origin vX.Y.Z`. O workflow exige que a tag bata com o package.json.
+12. Acompanhe: `gh run list --workflow desktop.yml --limit 2`, depois `gh run watch <id> --exit-status --interval 20` (cerca de 5 min). Os instaladores vão para o GitHub Release.
+13. Confirme no npm: `npm view brito-cli@X.Y.Z version --prefer-online` e `gh release view vX.Y.Z --json assets --jq '.assets[].name'`.
 
 ## Armadilhas
-- Um comando composto interrompido pode ter aplicado parte dos passos (checkout já rodou, bump já feito). Confira `git status`, a versão no package.json e o topo do CHANGELOG antes de repetir.
-- Reverter um arquivo com WIP sem salvar o patch perde o trabalho; sempre gere o patch antes.
-- CHANGELOG com entradas duplicadas quando versões são mescladas (ex.: `--version` listado duas vezes).
+- CHANGELOG.md e READMEs usam CRLF no Windows. Script Node de substituição por âncora multilinha (`s.includes("...\n...")`) falha com "âncora não encontrada". Detecte `s.includes("\r\n")` e converta `\n` para `\r\n` na âncora e no texto inserido (cheque com `head -c 40 CHANGELOG.md | od -c`). Um script que falha no meio pode já ter aplicado o bump; confira `git status` antes de repetir.
+- Se a ferramenta `Skill` retornar "Unknown skill", use `skill_load` com o nome.
+- `sleep N; comando` é bloqueado pela ferramenta Bash. Use `gh ... --watch`/`gh run watch` com `timeout`, ou um loop `until <checagem>; do sleep 10; done` (com `run_in_background` se for longo).
+- Logo após o push/criação do PR, `gh pr checks --watch` pode responder "no checks reported". Os checks ainda não foram registrados: confira com `gh pr view <N> --json statusCheckRollup` e rode o watch de novo.
+- O job de empacotamento do macOS só roda no CI (build local no Windows não pega). Falha típica: `xattr -cr` quebra por symlinks de `node_modules/.bin` copiados por `fs.cpSync` em `desktop/package.mjs`. A cópia deve ignorar symlinks (filter com `isSymbolicLink`). Mudanças no empacotamento desktop são de risco para macOS: olhe `gh run view <id> --json jobs --jq '.jobs[]|[.name,.conclusion]|@tsv'` e `--log-failed`.
+- Se o workflow da tag falhar depois do push (ex.: um job de package), NÃO reescreva/mova a tag nem republique a mesma versão: se o npm não foi publicado, corrija em nova branch a partir de `origin/main`, faça bump de patch (X.Y.Z+1), ajuste o CHANGELOG (junte as entradas na nova seção, a versão pulada não chegou ao npm) e repita o fluxo todo.
+- Depois que o job de publicação do CI termina, `npm view` ainda pode mostrar a versão antiga ou dar E404 por alguns minutos (propagação/cache). Veja no log do job `gh run view <id> --log --job <jobid>` se houve `+ brito-cli@X.Y.Z` / "Publishing" e faça polling com `--prefer-online` antes de declarar falha.
+- Não publique localmente se o CI já faz isso: seria duplicado e falharia na autenticação.
+- Reverter arquivo com WIP sem salvar patch (`git diff HEAD -- <arq> > patch`) perde trabalho.
 
 ## Verificação
-- tsc sem erros, `# fail 0` nos testes, dry-run mostrando `brito-cli@X.Y.Z`, `npm view` com a versão nova depois de publicar.
+- tsc sem erros, `fail 0` nos testes, build ok, PR com checks verdes, todos os jobs do workflow da tag em success (incluindo os dois de macOS), `npm view brito-cli dist-tags.latest` igual à versão nova, Release com os instaladores (Windows setup, macOS arm64/x64 dmg, Linux tar.gz).
