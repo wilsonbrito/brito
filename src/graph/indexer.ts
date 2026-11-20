@@ -69,6 +69,17 @@ function extract(root: Parser.SyntaxNode, lang: Lang, file: string): { syms: Sym
     return null;
   };
 
+  /**
+   * O objeto literal é o valor de uma variável com nome e sem tipo declarado (`const api = { buscar() {} }`, também com
+   * `as const`/`satisfies`)? Aí é um módulo, e os métodos continuam símbolos. Com tipo (`const b: ReplBackend = {…}`) é a
+   * implementação de uma interface: quem chama usa o tipo, então o método não tem nome próprio no grafo.
+   */
+  const isNamedObject = (obj: Parser.SyntaxNode): boolean => {
+    let p = obj.parent;
+    while (p && (p.type === "as_expression" || p.type === "satisfies_expression" || p.type === "parenthesized_expression" || p.type === "non_null_expression")) p = p.parent;
+    return p?.type === "variable_declarator" && p.childForFieldName("name")?.type === "identifier" && !p.childForFieldName("type");
+  };
+
   /** `import("./x")` ou `require("./x")` com literal de texto → "./x". */
   const moduleSpecOf = (call: Parser.SyntaxNode): string | null => {
     const fn = call.childForFieldName("function");
@@ -97,6 +108,9 @@ function extract(root: Parser.SyntaxNode, lang: Lang, file: string): { syms: Sym
       }
       case "method_definition": {
         const name = n.childForFieldName("name")?.text;
+        // Método de objeto literal anônimo (`defineTool({ run() {} })`, `return { ask() {} }`): quem o chama usa uma interface, e o nome
+        // solto (`run`, `ask`) só atraía arestas falsas pela heurística por nome. Sem símbolo, o corpo conta para quem contém o objeto.
+        if (name && n.parent?.type === "object" && !isNamedObject(n.parent)) break;
         if (name) nextOwner = mk(cls ? `${cls}.${name}` : name, "method", n);
         break;
       }
@@ -226,7 +240,7 @@ function resolveImport(from: string, spec: string, known: Set<string>, aliases?:
   return null;
 }
 
-const INDEXER_VERSION = "v8";
+const INDEXER_VERSION = "v9";
 /** Reexports (`export { x } from`) ficam na lista de bindings com este prefixo no nome local: ":" não existe em identificador, então não colide. */
 const REEXPORT = "export:";
 /** Quem faz as chamadas soltas no corpo do módulo (scripts, setup, `if __name__ == "__main__"`). Só existe nos arquivos que têm alguma. */
